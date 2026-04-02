@@ -231,14 +231,16 @@ class _PlanFactCard extends StatelessWidget {
       ));
     }
 
-    // OTS
-    if (planOts != null && planOts > 0) {
-      final factOts = (s != null && s.factOts > 0) ? s.factOts : null;
+    // OTS — показываем если есть план ИЛИ факт
+    final factOts = (s != null && s.factOts > 0) ? s.factOts : null;
+    if ((planOts != null && planOts > 0) || factOts != null) {
       rows.add(_PlanFactRow(
         label: 'OTS',
-        plan: fmtNum.format(planOts),
+        plan: (planOts != null && planOts > 0) ? fmtNum.format(planOts) : '—',
         fact: factOts != null ? fmtNum.format(factOts) : null,
-        ratio: factOts != null ? factOts / planOts : null,
+        ratio: (factOts != null && planOts != null && planOts > 0)
+            ? factOts / planOts
+            : null,
       ));
     }
 
