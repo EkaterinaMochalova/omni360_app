@@ -166,13 +166,25 @@ class CampaignStats {
   });
 
   factory CampaignStats.fromImpressionStats(Map<String, dynamic> json) {
+    final reserved = json['reservedBudgetStat'] as Map?;
+    // otsCount может быть 0 для FLEX_GUARANTEED — берём из reservedBudgetStat
+    final planOts = _n(json['otsCount']) > 0
+        ? _n(json['otsCount'])
+        : _n(reserved?['ots']);
+    // factOts: otsCountShowed или dailyOtsShowed * дней
+    final factOts = _n(json['otsCountShowed']) > 0
+        ? _n(json['otsCountShowed'])
+        : _n(json['totalDmpOts']) > 0
+            ? _n(json['totalDmpOts'])
+            : _n(json['totalEstimatedOts']);
+
     return CampaignStats(
-      planBudget:      _n(json['budget']),
-      planDailyBudget: _n(json['dailyBudget']),
-      planOts:         _n(json['otsCount']),
+      planBudget:      _n(json['budget']) > 0 ? _n(json['budget']) : _n(reserved?['budget']),
+      planDailyBudget: _n(json['dailyBudget']) > 0 ? _n(json['dailyBudget']) : _n(reserved?['dailyBudget']),
+      planOts:         planOts,
       factBudget:      _n(json['totalBudgetShowed']),
       factDailyBudget: _n(json['dailyBudgetShowed']),
-      factOts:         _n(json['otsCountShowed']),
+      factOts:         factOts,
       factExits:       (_n(json['totalCountShowed'])).toInt(),
       cpm:             _n(json['cpm']),
       daily: const [],

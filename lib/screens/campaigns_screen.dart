@@ -335,10 +335,13 @@ class _StatsBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final active = all.where((c) => c.isActive).length;
+    final active = filtered.where((c) => c.isActive).length;
     final fmt = NumberFormat.currency(
         locale: 'ru_RU', symbol: '₽', decimalDigits: 0);
-    final totalBudget = all.fold<double>(0, (s, c) => s + (c.budget ?? 0));
+    // Бюджет только по отфильтрованным кампаниям
+    final filteredBudget =
+        filtered.fold<double>(0, (s, c) => s + (c.budget ?? 0));
+    final isFiltered = filtered.length != all.length;
 
     return Container(
       color: Colors.white,
@@ -356,8 +359,8 @@ class _StatsBar extends StatelessWidget {
               color: const Color(0xFF2E7D32)),
           const SizedBox(width: 12),
           _StatChip(
-              label: 'Бюджет',
-              value: fmt.format(totalBudget),
+              label: isFiltered ? 'Бюджет (выбранных)' : 'Бюджет',
+              value: fmt.format(filteredBudget),
               color: kAccent),
         ],
       ),
