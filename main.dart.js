@@ -26054,16 +26054,13 @@ _.x=i
 _.y=j
 _.z=k
 _.Q=l},
-ha:function ha(a,b,c,d,e,f,g,h,i){var _=this
-_.a=a
-_.b=b
-_.c=c
-_.d=d
-_.e=e
-_.f=f
-_.r=g
-_.w=h
-_.x=i},
+ha:function ha(a,b,c,d,e,f){var _=this
+_.d=a
+_.e=b
+_.f=c
+_.r=d
+_.w=e
+_.x=f},
 xF:function xF(a,b){this.a=a
 this.b=b},
 hI:function hI(a,b){this.a=a
@@ -86643,44 +86640,44 @@ return A.R($async$$2,r)},
 $S:522}
 A.av0.prototype={
 $2(a,b){return this.Z6(a,b)},
-Z6(a1,a2){var s=0,r=A.S(t.NV),q,p=2,o=[],n,m,l,k,j,i,h,g,f,e,d,c,b,a,a0
-var $async$$2=A.T(function(a3,a4){if(a3===1){o.push(a4)
+Z6(a,b){var s=0,r=A.S(t.NV),q,p=2,o=[],n,m,l,k,j,i,h,g,f,e,d,c
+var $async$$2=A.T(function(a0,a1){if(a0===1){o.push(a1)
 s=p}for(;;)switch(s){case 0:p=4
 k=$.a_G().a
 k===$&&A.a()
 j=t.z
 s=7
-return A.V(k.Bv(0,"/api/v1.0/clients/campaigns/"+a2+"/impression-stats",A.ax(["reqList","{}"],t.N,j),j),$async$$2)
-case 7:n=a4
+return A.V(k.Bv(0,"/api/v1.0/clients/campaigns/"+b+"/impression-stats",A.ax(["reqList","{}"],t.N,j),j),$async$$2)
+case 7:n=a1
 m=n.a
 if(t.a.b(m)){k=m
 j=J.aC(k)
 i=t.Xw.a(j.i(k,"reservedBudgetStat"))
-if(A.f3(j.i(k,"otsCount"))>0)h=A.f3(j.i(k,"otsCount"))
-else h=A.f3(i==null?null:J.b9(i,"ots"))
-if(A.f3(j.i(k,"otsCountShowed"))>0)g=A.f3(j.i(k,"otsCountShowed"))
-else g=A.f3(j.i(k,"totalDmpOts"))>0?A.f3(j.i(k,"totalDmpOts")):A.f3(j.i(k,"totalEstimatedOts"))
-if(A.f3(j.i(k,"budget"))>0)f=A.f3(j.i(k,"budget"))
-else f=A.f3(i==null?null:J.b9(i,"budget"))
-if(A.f3(j.i(k,"dailyBudget"))>0)e=A.f3(j.i(k,"dailyBudget"))
-else e=A.f3(i==null?null:J.b9(i,"dailyBudget"))
-d=A.f3(j.i(k,"totalBudgetShowed"))
-c=A.f3(j.i(k,"dailyBudgetShowed"))
-b=B.e.dn(A.f3(j.i(k,"totalCountShowed")))
+if(A.f3(j.i(k,"otsCount"))>0)A.f3(j.i(k,"otsCount"))
+else A.f3(i==null?null:J.b9(i,"ots"))
+if(A.f3(j.i(k,"otsCountShowed"))>0)h=A.f3(j.i(k,"otsCountShowed"))
+else h=A.f3(j.i(k,"totalDmpOts"))>0?A.f3(j.i(k,"totalDmpOts")):A.f3(j.i(k,"totalEstimatedOts"))
+if(A.f3(j.i(k,"budget"))>0)A.f3(j.i(k,"budget"))
+else A.f3(i==null?null:J.b9(i,"budget"))
+if(A.f3(j.i(k,"dailyBudget"))>0)A.f3(j.i(k,"dailyBudget"))
+else A.f3(i==null?null:J.b9(i,"dailyBudget"))
+g=A.f3(j.i(k,"totalBudgetShowed"))
+f=A.f3(j.i(k,"dailyBudgetShowed"))
+e=B.e.dn(A.f3(j.i(k,"totalCountShowed")))
 k=A.f3(j.i(k,"cpm"))
-q=new A.ha(f,e,h,d,c,g,b,k,B.pw)
+q=new A.ha(g,f,h,e,k,B.pw)
 s=1
 break}p=2
 s=6
 break
 case 4:p=3
-a0=o.pop()
-k=A.ak(a0)
+c=o.pop()
+k=A.ak(c)
 if(k instanceof A.hL){l=k
 k=l.b
 k=k==null?null:k.c
 j=l.b
-A.a_y("[impression-stats] "+A.n(k)+": "+A.n(j==null?null:j.a))}else throw a0
+A.a_y("[impression-stats] "+A.n(k)+": "+A.n(j==null?null:j.a))}else throw c
 s=6
 break
 case 3:s=2
@@ -86743,28 +86740,28 @@ r=r.z
 if(r==null)r="\u2014"
 return new A.vW(A.kq(A.d([B.IA,B.C0,A.KV(A.cv(q+" \u2013 "+r,s,s,s,B.aaE,s,s),1)],t.p),B.an,B.a2,B.ak),s)}}
 A.mv.prototype={
-K(a){var s,r,q,p,o,n,m,l=this,k=null,j=A.axF(0,"ru_RU","\u20bd"),i=A.aP7("ru_RU"),h=t.p,g=A.d([],h),f=l.d,e=f!=null,d=e&&f.a>0?f.a:l.c.e,c=e&&f.b>0?f.b:l.c.f,b=e&&f.c>0?f.c:l.c.w
-if(d!=null&&d>0){s=e&&f.d>0?f.d:k
-r=j.h2(d)
+K(a){var s,r,q,p,o,n,m,l=null,k=A.axF(0,"ru_RU","\u20bd"),j=A.aP7("ru_RU"),i=t.p,h=A.d([],i),g=this.d,f=this.c,e=f.e,d=f.f,c=f.w
+if(e!=null&&e>0){s=g!=null&&g.d>0?g.d:l
+r=k.h2(e)
 q=s!=null
-p=q?j.h2(s):k
-g.push(new A.rz("\u0411\u044e\u0434\u0436\u0435\u0442",r,p,q?s/d:k,k))}if(c!=null&&c>0){o=e&&f.e>0?f.e:k
-r=j.h2(c)
+p=q?k.h2(s):l
+h.push(new A.rz("\u0411\u044e\u0434\u0436\u0435\u0442",r,p,q?s/e:l,l))}if(d!=null&&d>0){o=g!=null&&g.e>0?g.e:l
+r=k.h2(d)
 q=o!=null
-p=q?j.h2(o):k
-g.push(new A.rz("\u0412 \u0434\u0435\u043d\u044c",r,p,q?o/c:k,k))}if(b!=null&&b>0){n=e&&f.f>0?f.f:k
-r=i.h2(b)
+p=q?k.h2(o):l
+h.push(new A.rz("\u0412 \u0434\u0435\u043d\u044c",r,p,q?o/d:l,l))}if(c!=null&&c>0){n=g!=null&&g.f>0?g.f:l
+r=j.h2(c)
 q=n!=null
-p=q?i.h2(n):k
-g.push(new A.rz("OTS",r,p,q?n/b:k,k))}if(e&&f.r>0){m=l.c.x
-e=m!=null
-r=e&&m>0?i.h2(m):"\u2014"
-q=f.r
-p=i.h2(q)
-g.push(new A.rz("\u0412\u044b\u0445\u043e\u0434\u044b",r,p,e&&m>0?q/m:k,k))}if(g.length===0)return B.ad
-h=A.d([A.kq(A.d([B.HX,B.a6f,B.iD,B.a6m],h),B.an,B.a2,B.ak),B.iE,B.ou,B.iF],h)
-B.c.N(h,new A.a5(g,new A.aqp(),t.s9))
-return new A.vW(A.hd(h,B.b_,B.a2,B.ak),k)}}
+p=q?j.h2(n):l
+h.push(new A.rz("OTS",r,p,q?n/c:l,l))}if(g!=null&&g.r>0){m=f.x
+f=m!=null
+r=f&&m>0?j.h2(m):"\u2014"
+q=g.r
+p=j.h2(q)
+h.push(new A.rz("\u0412\u044b\u0445\u043e\u0434\u044b",r,p,f&&m>0?q/m:l,l))}if(h.length===0)return B.ad
+i=A.d([A.kq(A.d([B.HX,B.a6f,B.iD,B.a6m],i),B.an,B.a2,B.ak),B.iE,B.ou,B.iF],i)
+B.c.N(i,new A.a5(h,new A.aqp(),t.s9))
+return new A.vW(A.hd(i,B.b_,B.a2,B.ak),l)}}
 A.aqp.prototype={
 $1(a){return A.hd(A.d([a,B.iF],t.p),B.an,B.a2,B.ak)},
 $S:533}
@@ -92129,7 +92126,7 @@ B.F5=new A.YZ()
 B.nO=new A.a1m(0,"pixel")
 B.nP=new A.hJ(0,"nameAsc")
 B.pw=s([],A.at("x<aYO>"))
-B.Fc=new A.ha(0,0,0,0,0,0,0,0,B.pw)
+B.Fc=new A.ha(0,0,0,0,0,B.pw)
 B.Fd=new A.xX(null)
 B.cs=new A.oT(3,"experimentalWebParagraph")
 B.Fh=new A.y_(null,null,null,null,null,null,null)
