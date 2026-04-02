@@ -86740,28 +86740,30 @@ r=r.z
 if(r==null)r="\u2014"
 return new A.vW(A.kq(A.d([B.IA,B.C0,A.KV(A.cv(q+" \u2013 "+r,s,s,s,B.aaE,s,s),1)],t.p),B.an,B.a2,B.ak),s)}}
 A.mv.prototype={
-K(a){var s,r,q,p,o,n,m,l=null,k=A.axF(0,"ru_RU","\u20bd"),j=A.aP7("ru_RU"),i=t.p,h=A.d([],i),g=this.d,f=this.c,e=f.e,d=f.f,c=f.w
-if(e!=null&&e>0){s=g!=null&&g.d>0?g.d:l
-r=k.h2(e)
+K(a0){var s,r,q,p,o,n,m,l,k,j=null,i=A.axF(0,"ru_RU","\u20bd"),h=A.aP7("ru_RU"),g=t.p,f=A.d([],g),e=this.d,d=this.c,c=d.e,b=d.f,a=d.w
+if(c!=null&&c>0){s=e!=null&&e.d>0?e.d:j
+r=i.h2(c)
 q=s!=null
-p=q?k.h2(s):l
-h.push(new A.rz("\u0411\u044e\u0434\u0436\u0435\u0442",r,p,q?s/e:l,l))}if(d!=null&&d>0){o=g!=null&&g.e>0?g.e:l
-r=k.h2(d)
+p=q?i.h2(s):j
+f.push(new A.rz("\u0411\u044e\u0434\u0436\u0435\u0442",r,p,q?s/c:j,j))}if(b!=null&&b>0){o=e!=null&&e.e>0?e.e:j
+r=i.h2(b)
 q=o!=null
-p=q?k.h2(o):l
-h.push(new A.rz("\u0412 \u0434\u0435\u043d\u044c",r,p,q?o/d:l,l))}if(c!=null&&c>0){n=g!=null&&g.f>0?g.f:l
-r=j.h2(c)
-q=n!=null
-p=q?j.h2(n):l
-h.push(new A.rz("OTS",r,p,q?n/c:l,l))}if(g!=null&&g.r>0){m=f.x
-f=m!=null
-r=f&&m>0?j.h2(m):"\u2014"
-q=g.r
-p=j.h2(q)
-h.push(new A.rz("\u0412\u044b\u0445\u043e\u0434\u044b",r,p,f&&m>0?q/m:l,l))}if(h.length===0)return B.ad
-i=A.d([A.kq(A.d([B.HX,B.a6f,B.iD,B.a6m],i),B.an,B.a2,B.ak),B.iE,B.ou,B.iF],i)
-B.c.N(i,new A.a5(h,new A.aqp(),t.s9))
-return new A.vW(A.hd(i,B.b_,B.a2,B.ak),l)}}
+p=q?i.h2(o):j
+f.push(new A.rz("\u0412 \u0434\u0435\u043d\u044c",r,p,q?o/b:j,j))}r=e!=null
+n=r&&e.f>0?e.f:j
+q=a!=null
+if(q&&a>0||n!=null){p=q&&a>0?h.h2(a):"\u2014"
+m=n!=null
+l=m?h.h2(n):j
+f.push(new A.rz("OTS",p,l,m&&q&&a>0?n/a:j,j))}if(r&&e.r>0){k=d.x
+d=k!=null
+r=d&&k>0?h.h2(k):"\u2014"
+q=e.r
+p=h.h2(q)
+f.push(new A.rz("\u0412\u044b\u0445\u043e\u0434\u044b",r,p,d&&k>0?q/k:j,j))}if(f.length===0)return B.ad
+g=A.d([A.kq(A.d([B.HX,B.a6f,B.iD,B.a6m],g),B.an,B.a2,B.ak),B.iE,B.ou,B.iF],g)
+B.c.N(g,new A.a5(f,new A.aqp(),t.s9))
+return new A.vW(A.hd(g,B.b_,B.a2,B.ak),j)}}
 A.aqp.prototype={
 $1(a){return A.hd(A.d([a,B.iF],t.p),B.an,B.a2,B.ak)},
 $S:533}
