@@ -202,16 +202,11 @@ class _PlanFactCard extends StatelessWidget {
 
     final s = stats; // non-nullable local for null-safety
 
-    // Приоритет плана: из impression-stats (planBudget) > из campaign detail
-    final planBudget = (s != null && s.planBudget > 0)
-        ? s.planBudget
-        : campaign.budget;
-    final planDaily = (s != null && s.planDailyBudget > 0)
-        ? s.planDailyBudget
-        : campaign.dailyBudget;
-    final planOts = (s != null && s.planOts > 0)
-        ? s.planOts
-        : campaign.ots;
+    // ПЛАН всегда из данных кампании (detail endpoint)
+    // impression-stats используем только для ФАКТ
+    final planBudget = campaign.budget;
+    final planDaily = campaign.dailyBudget;
+    final planOts = campaign.ots;
 
     // Бюджет
     if (planBudget != null && planBudget > 0) {
