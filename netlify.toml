@@ -1,9 +1,6 @@
 [build]
-  command   = "flutter/bin/flutter build web --release"
+  command   = "./build_netlify.sh"
   publish   = "build/web"
-
-[build.environment]
-  FLUTTER_VERSION = "3.41.6"
 
 [[redirects]]
   from   = "/*"
