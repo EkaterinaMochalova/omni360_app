@@ -109,6 +109,7 @@ class _CampaignCreateScreenState
         'ots': double.tryParse(_otsCtrl.text.replaceAll(' ', '')),
       if (_dailyOtsCtrl.text.isNotEmpty)
         'dailyOts': double.tryParse(_dailyOtsCtrl.text.replaceAll(' ', '')),
+      'bidType': 'OTS',
       'strategy': _strategy,
       if (_bidCtrl.text.isNotEmpty)
         'commonBid': double.tryParse(_bidCtrl.text.replaceAll(' ', '')),
