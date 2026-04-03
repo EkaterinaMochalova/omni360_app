@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../main.dart';
+import 'package:dio/dio.dart';
 import '../api/omni360_client.dart';
 import '../models/reference.dart';
 import '../providers/campaigns_provider.dart';
@@ -125,6 +126,12 @@ class _CampaignCreateScreenState
       await Omni360Client().dio.post('/api/v1.0/clients/campaigns', data: body);
       ref.invalidate(campaignsProvider);
       if (mounted) Navigator.of(context).pop(true);
+    } on DioException catch (e) {
+      final body = e.response?.data;
+      final msg = body is Map
+          ? (body['message'] ?? body['error'] ?? body.toString())
+          : body?.toString() ?? e.message ?? e.toString();
+      setState(() => _error = 'API: $msg');
     } catch (e) {
       setState(() => _error = e.toString());
     } finally {
