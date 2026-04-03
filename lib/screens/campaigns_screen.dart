@@ -416,7 +416,7 @@ class _FilterBar extends StatelessWidget {
               onTap: () => onSelect(f),
               child: Container(
                 padding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
                   color: sel ? kAccent : Colors.white,
                   borderRadius: BorderRadius.circular(20),
@@ -426,7 +426,7 @@ class _FilterBar extends StatelessWidget {
                   f,
                   style: TextStyle(
                     color: sel ? Colors.white : kTextSecondary,
-                    fontSize: 13,
+                    fontSize: 11,
                     fontWeight: sel ? FontWeight.w600 : FontWeight.normal,
                   ),
                 ),
