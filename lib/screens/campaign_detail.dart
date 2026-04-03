@@ -261,10 +261,17 @@ class _PlanFactCard extends StatelessWidget {
 
     if (rows.isEmpty) return const SizedBox.shrink();
 
+    // Алерты темпа расхода
+    final alerts = s != null ? _buildAlerts(campaign, s) : <_PaceAlert>[];
+
     return _Card(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          if (alerts.isNotEmpty) ...[
+            ...alerts.map((a) => _AlertBanner(alert: a)),
+            const SizedBox(height: 10),
+          ],
           // Header
           Row(
             children: [
@@ -477,6 +484,112 @@ class _SmallStat extends StatelessWidget {
                   fontSize: 16)),
         ],
       );
+}
+
+// ── Pace alerts ───────────────────────────────────────────────────────────────
+
+enum _PaceType { over, under }
+
+class _PaceAlert {
+  final String metric;
+  final _PaceType type;
+  final double pct; // отклонение в %
+
+  const _PaceAlert(this.metric, this.type, this.pct);
+}
+
+/// Вычисляет ожидаемую долю суточного расхода исходя из текущего времени.
+/// Предполагаем активные часы кампании: 8:00–22:00 (14 ч).
+double _expectedDayFraction() {
+  final now = DateTime.now();
+  const start = 8;
+  const end = 22;
+  const total = end - start; // 14 часов
+  final elapsed = (now.hour + now.minute / 60 - start).clamp(0.0, total.toDouble());
+  if (elapsed < 0.5) return 0; // слишком рано — не проверяем
+  return elapsed / total;
+}
+
+List<_PaceAlert> _buildAlerts(Campaign campaign, CampaignStats s) {
+  final alerts = <_PaceAlert>[];
+  final dayFraction = _expectedDayFraction();
+  if (dayFraction <= 0) return alerts;
+
+  void check(String label, double plan, double fact) {
+    if (plan <= 0 || fact <= 0) return;
+    final expected = plan * dayFraction;
+    final pace = fact / expected;
+    if (pace > 1.25) {
+      alerts.add(_PaceAlert(label, _PaceType.over, (pace - 1) * 100));
+    } else if (pace < 0.7) {
+      alerts.add(_PaceAlert(label, _PaceType.under, (1 - pace) * 100));
+    }
+  }
+
+  // Используем часовые данные если есть, иначе суточные
+  if (s.hourlyBudgetPlan > 0 && s.hourlyBudgetFact > 0) {
+    final pace = s.hourlyBudgetFact / s.hourlyBudgetPlan;
+    if (pace > 1.25) alerts.add(_PaceAlert('Бюджет/час', _PaceType.over, (pace - 1) * 100));
+    if (pace < 0.7)  alerts.add(_PaceAlert('Бюджет/час', _PaceType.under, (1 - pace) * 100));
+  } else {
+    check('Бюджет', campaign.dailyBudget ?? 0, s.factDailyBudget);
+  }
+
+  if (s.hourlyOtsPlan > 0 && s.hourlyOtsFact > 0) {
+    final pace = s.hourlyOtsFact / s.hourlyOtsPlan;
+    if (pace > 1.25) alerts.add(_PaceAlert('OTS/час', _PaceType.over, (pace - 1) * 100));
+    if (pace < 0.7)  alerts.add(_PaceAlert('OTS/час', _PaceType.under, (1 - pace) * 100));
+  } else if (s.factOts > 0) {
+    check('OTS', s.planOts, s.factOts);
+  }
+
+  if (s.hourlyExitsFact > 0) {
+    final planHourlyExits = (campaign.exits ?? 0) / 14; // 14 активных часов
+    if (planHourlyExits > 0) {
+      final pace = s.hourlyExitsFact / planHourlyExits;
+      if (pace > 1.25) alerts.add(_PaceAlert('Выходы/час', _PaceType.over, (pace - 1) * 100));
+      if (pace < 0.7)  alerts.add(_PaceAlert('Выходы/час', _PaceType.under, (1 - pace) * 100));
+    }
+  }
+
+  return alerts;
+}
+
+class _AlertBanner extends StatelessWidget {
+  final _PaceAlert alert;
+  const _AlertBanner({required this.alert});
+
+  @override
+  Widget build(BuildContext context) {
+    final isOver = alert.type == _PaceType.over;
+    final color = isOver ? const Color(0xFFC62828) : const Color(0xFF1565C0);
+    final bg = isOver ? const Color(0xFFFFEBEE) : const Color(0xFFE3F2FD);
+    final icon = isOver ? '⚡' : '📉';
+    final label = isOver ? 'Перерасход' : 'Недотрата';
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        children: [
+          Text(icon, style: const TextStyle(fontSize: 14)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              '$label ${alert.metric}: ${alert.pct.toStringAsFixed(0)}% от ожидаемого темпа',
+              style: TextStyle(
+                  color: color, fontSize: 12, fontWeight: FontWeight.w500),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 // ── Shared ────────────────────────────────────────────────────────────────────

@@ -149,6 +149,13 @@ class CampaignStats {
   final double factOts;          // otsCountShowed
   final int factExits;           // totalCountShowed (кол-во выходов)
 
+  // Часовые показатели (для расчёта темпа)
+  final double hourlyBudgetPlan;    // hourlyBudget
+  final double hourlyBudgetFact;    // hourlyBudgetShowed
+  final double hourlyOtsPlan;       // hourlyOts
+  final double hourlyOtsFact;       // hourlyOtsShowed
+  final int    hourlyExitsFact;     // hourlyCountShowed
+
   // Дополнительно
   final double cpm;
   final List<DailyStat> daily;
@@ -161,6 +168,11 @@ class CampaignStats {
     required this.factDailyBudget,
     required this.factOts,
     required this.factExits,
+    required this.hourlyBudgetPlan,
+    required this.hourlyBudgetFact,
+    required this.hourlyOtsPlan,
+    required this.hourlyOtsFact,
+    required this.hourlyExitsFact,
     required this.cpm,
     required this.daily,
   });
@@ -185,7 +197,12 @@ class CampaignStats {
       factBudget:      _n(json['totalBudgetShowed']),
       factDailyBudget: _n(json['dailyBudgetShowed']),
       factOts:         factOts,
-      factExits:       (_n(json['totalCountShowed'])).toInt(),
+      factExits:       _n(json['totalCountShowed']).toInt(),
+      hourlyBudgetPlan: _n(json['hourlyBudget']),
+      hourlyBudgetFact: _n(json['hourlyBudgetShowed']),
+      hourlyOtsPlan:    _n(json['hourlyOts']),
+      hourlyOtsFact:    _n(json['hourlyOtsShowed']),
+      hourlyExitsFact:  _n(json['hourlyCountShowed']).toInt(),
       cpm:             _n(json['cpm']),
       daily: const [],
     );
@@ -194,7 +211,10 @@ class CampaignStats {
   factory CampaignStats.empty() => const CampaignStats(
         planBudget: 0, planDailyBudget: 0, planOts: 0,
         factBudget: 0, factDailyBudget: 0, factOts: 0,
-        factExits: 0, cpm: 0, daily: [],
+        factExits: 0,
+        hourlyBudgetPlan: 0, hourlyBudgetFact: 0,
+        hourlyOtsPlan: 0, hourlyOtsFact: 0, hourlyExitsFact: 0,
+        cpm: 0, daily: [],
       );
 
   static double _n(dynamic v) {
