@@ -1,17 +1,42 @@
+/// Временной слот расписания кампании.
+/// [relativeStartTime] и [relativeEndTime] — секунды от полуночи.
+/// [dayOfWeek] — 1=Пн … 7=Вс (ISO 8601, совпадает с DateTime.weekday).
+class TimeSlot {
+  final int dayOfWeek;
+  final int relativeStartTime;
+  final int relativeEndTime;
+
+  const TimeSlot({
+    required this.dayOfWeek,
+    required this.relativeStartTime,
+    required this.relativeEndTime,
+  });
+
+  int get startHour => relativeStartTime ~/ 3600;
+  int get endHour => (relativeEndTime / 3600).ceil().clamp(0, 24);
+
+  factory TimeSlot.fromJson(Map<String, dynamic> json) => TimeSlot(
+        dayOfWeek: (json['dayOfWeek'] as num?)?.toInt() ?? 1,
+        relativeStartTime: (json['relativeStartTime'] as num?)?.toInt() ?? 0,
+        relativeEndTime: (json['relativeEndTime'] as num?)?.toInt() ?? 86400,
+      );
+}
+
 class Campaign {
   final String id;
   final String name;
   final String status;
-  final String? advertiser;   // Рекламодатель
+  final String? advertiser;
   final double? budget;
-  final double? dailyBudget;  // Бюджет в день
+  final double? dailyBudget;
   final double? spent;
-  final double? ots;          // OTS
-  final double? exits;        // Выходы
+  final double? ots;
+  final double? exits;
   final String? startDate;
   final String? endDate;
   final String? type;
   final String? city;
+  final List<TimeSlot>? timeSettings;
 
   const Campaign({
     required this.id,
@@ -27,6 +52,7 @@ class Campaign {
     this.endDate,
     this.type,
     this.city,
+    this.timeSettings,
   });
 
   factory Campaign.fromJson(Map<String, dynamic> json) => Campaign(
@@ -49,6 +75,9 @@ class Campaign {
         type: json['type']?.toString(),
         city: json['city']?.toString() ??
             (json['targetCity'] as Map?)?['name']?.toString(),
+        timeSettings: (json['timeSettings'] as List?)
+            ?.map((e) => TimeSlot.fromJson(e as Map<String, dynamic>))
+            .toList(),
       );
 
   /// Сумма OTS по всем инвентарям во всех сегментах (единиц × 1000 контактов)

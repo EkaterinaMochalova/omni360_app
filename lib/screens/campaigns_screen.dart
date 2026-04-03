@@ -5,6 +5,7 @@ import '../main.dart';
 import '../providers/auth_provider.dart';
 import '../providers/campaigns_provider.dart';
 import '../models/campaign.dart';
+import '../utils/pace_alerts.dart';
 import 'campaign_detail.dart';
 
 // ── Sort enum ─────────────────────────────────────────────────────────────────
@@ -439,14 +440,14 @@ class _FilterBar extends StatelessWidget {
 
 // ── Campaign card ─────────────────────────────────────────────────────────────
 
-class _CampaignCard extends StatelessWidget {
+class _CampaignCard extends ConsumerWidget {
   final Campaign campaign;
   final VoidCallback onTap;
 
   const _CampaignCard({required this.campaign, required this.onTap});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final fmt = NumberFormat.currency(
         locale: 'ru_RU', symbol: '₽', decimalDigits: 0);
     final c = campaign;
@@ -454,6 +455,20 @@ class _CampaignCard extends StatelessWidget {
     final (statusBg, statusFg) = _statusColors(c.status);
     final ratio = (c.spent != null && c.budget != null && c.budget! > 0)
         ? (c.spent! / c.budget!).clamp(0.0, 1.0)
+        : null;
+
+    // Алерты — загружаем stats только для активных кампаний
+    final alertDots = c.isActive
+        ? ref.watch(campaignStatsProvider(c.id)).whenOrNull(
+              data: (stats) {
+                final alerts = buildAlerts(c, stats);
+                if (alerts.isEmpty) return null;
+                final hasOver = alerts.any((a) => a.type == PaceType.over);
+                final hasNoExits = alerts.any((a) => a.type == PaceType.noExits);
+                final hasUnder = alerts.any((a) => a.type == PaceType.under);
+                return (hasOver: hasOver, hasNoExits: hasNoExits, hasUnder: hasUnder);
+              },
+            )
         : null;
 
     return GestureDetector(
@@ -506,6 +521,21 @@ class _CampaignCard extends StatelessWidget {
                 ),
               ],
             ),
+
+            if (alertDots != null) ...[
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 6,
+                children: [
+                  if (alertDots.hasOver)
+                    _AlertDot('⚡ Перерасход', const Color(0xFFC62828), const Color(0xFFFFEBEE)),
+                  if (alertDots.hasNoExits)
+                    _AlertDot('⚠ Нет выходов/час', const Color(0xFFE65100), const Color(0xFFFFF3E0)),
+                  if (alertDots.hasUnder)
+                    _AlertDot('📉 Недотрата', const Color(0xFF1565C0), const Color(0xFFE3F2FD)),
+                ],
+              ),
+            ],
 
             if (c.advertiser != null) ...[
               const SizedBox(height: 4),
@@ -614,6 +644,25 @@ class _CampaignCard extends StatelessWidget {
       _ => (const Color(0xFFF5F5F5), const Color(0xFF757575)),
     };
   }
+}
+
+class _AlertDot extends StatelessWidget {
+  final String label;
+  final Color color;
+  final Color bg;
+  const _AlertDot(this.label, this.color, this.bg);
+
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Text(label,
+            style: TextStyle(
+                color: color, fontSize: 10, fontWeight: FontWeight.w500)),
+      );
 }
 
 class _Metric extends StatelessWidget {

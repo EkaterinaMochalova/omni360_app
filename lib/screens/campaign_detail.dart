@@ -5,6 +5,7 @@ import '../main.dart';
 import '../providers/campaigns_provider.dart';
 import '../models/campaign.dart';
 import '../widgets/stats_chart.dart';
+import '../utils/pace_alerts.dart';
 
 class CampaignDetailScreen extends ConsumerWidget {
   final String campaignId;
@@ -262,7 +263,7 @@ class _PlanFactCard extends StatelessWidget {
     if (rows.isEmpty) return const SizedBox.shrink();
 
     // Алерты темпа расхода
-    final alerts = s != null ? _buildAlerts(campaign, s) : <_PaceAlert>[];
+    final alerts = s != null ? buildAlerts(campaign, s) : <PaceAlert>[];
 
     return _Card(
       child: Column(
@@ -486,88 +487,16 @@ class _SmallStat extends StatelessWidget {
       );
 }
 
-// ── Pace alerts ───────────────────────────────────────────────────────────────
-
-enum _PaceType { over, under, noExits }
-
-class _PaceAlert {
-  final String metric;
-  final _PaceType type;
-  final double pct; // отклонение в %
-
-  const _PaceAlert(this.metric, this.type, this.pct);
-}
-
-/// Вычисляет ожидаемую долю суточного расхода исходя из текущего времени.
-/// Предполагаем активные часы кампании: 8:00–22:00 (14 ч).
-double _expectedDayFraction() {
-  final now = DateTime.now();
-  const start = 8;
-  const end = 22;
-  const total = end - start; // 14 часов
-  final elapsed = (now.hour + now.minute / 60 - start).clamp(0.0, total.toDouble());
-  if (elapsed < 0.5) return 0; // слишком рано — не проверяем
-  return elapsed / total;
-}
-
-List<_PaceAlert> _buildAlerts(Campaign campaign, CampaignStats s) {
-  final alerts = <_PaceAlert>[];
-  final dayFraction = _expectedDayFraction();
-  if (dayFraction <= 0) return alerts;
-
-  void check(String label, double plan, double fact) {
-    if (plan <= 0 || fact <= 0) return;
-    final expected = plan * dayFraction;
-    final pace = fact / expected;
-    if (pace > 1.25) {
-      alerts.add(_PaceAlert(label, _PaceType.over, (pace - 1) * 100));
-    } else if (pace < 0.7) {
-      alerts.add(_PaceAlert(label, _PaceType.under, (1 - pace) * 100));
-    }
-  }
-
-  // Используем часовые данные если есть, иначе суточные
-  if (s.hourlyBudgetPlan > 0 && s.hourlyBudgetFact > 0) {
-    final pace = s.hourlyBudgetFact / s.hourlyBudgetPlan;
-    if (pace > 1.25) alerts.add(_PaceAlert('Бюджет/час', _PaceType.over, (pace - 1) * 100));
-    if (pace < 0.7)  alerts.add(_PaceAlert('Бюджет/час', _PaceType.under, (1 - pace) * 100));
-  } else {
-    check('Бюджет', campaign.dailyBudget ?? 0, s.factDailyBudget);
-  }
-
-  // OTS: проверяем темп только если есть плановые OTS
-  if (s.planOts > 0 && s.hourlyOtsPlan > 0 && s.hourlyOtsFact > 0) {
-    final pace = s.hourlyOtsFact / s.hourlyOtsPlan;
-    if (pace > 1.25) alerts.add(_PaceAlert('OTS/час', _PaceType.over, (pace - 1) * 100));
-    if (pace < 0.7)  alerts.add(_PaceAlert('OTS/час', _PaceType.under, (1 - pace) * 100));
-  } else if (s.planOts > 0 && s.factOts > 0) {
-    check('OTS', s.planOts, s.factOts);
-  }
-
-  // Выходы: темп если есть плановые выходы
-  final planHourlyExits = (campaign.exits ?? 0) / 14;
-  if (s.hourlyExitsFact > 0 && planHourlyExits > 0) {
-    final pace = s.hourlyExitsFact / planHourlyExits;
-    if (pace > 1.25) alerts.add(_PaceAlert('Выходы/час', _PaceType.over, (pace - 1) * 100));
-    if (pace < 0.7)  alerts.add(_PaceAlert('Выходы/час', _PaceType.under, (1 - pace) * 100));
-  }
-
-  // Нет выходов за последний час (кампания активна, но в текущем часу 0 выходов)
-  if (campaign.isActive && s.factExits > 0 && s.hourlyExitsFact == 0) {
-    alerts.add(_PaceAlert('Выходы', _PaceType.noExits, 0));
-  }
-
-  return alerts;
-}
+// ── Pace alert banner ─────────────────────────────────────────────────────────
 
 class _AlertBanner extends StatelessWidget {
-  final _PaceAlert alert;
+  final PaceAlert alert;
   const _AlertBanner({required this.alert});
 
   @override
   Widget build(BuildContext context) {
-    final isNoExits = alert.type == _PaceType.noExits;
-    final isOver = alert.type == _PaceType.over;
+    final isNoExits = alert.type == PaceType.noExits;
+    final isOver = alert.type == PaceType.over;
     final color = isNoExits
         ? const Color(0xFFE65100)
         : isOver
