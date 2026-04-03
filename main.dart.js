@@ -96108,6 +96108,7 @@ d=m.cx.a.a
 if(d.length!==0)e.n(0,"ots",A.oE(A.dJ(d," ","")))
 d=m.cy.a.a
 if(d.length!==0)e.n(0,"dailyOts",A.oE(A.dJ(d," ","")))
+e.n(0,"bidType","OTS")
 e.n(0,"strategy",m.db)
 d=m.dx.a.a
 if(d.length!==0)e.n(0,"commonBid",A.oE(A.dJ(d," ","")))
