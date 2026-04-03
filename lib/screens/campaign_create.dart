@@ -112,6 +112,7 @@ class _CampaignCreateScreenState
       'strategy': _strategy,
       if (_bidCtrl.text.isNotEmpty)
         'commonBid': double.tryParse(_bidCtrl.text.replaceAll(' ', '')),
+      'segments': <Map<String, dynamic>>[],
       if (_regions.isNotEmpty) 'cities': _regions.map((r) => r.id).toList(),
       'targetAudience': {
         'enabled': true,
