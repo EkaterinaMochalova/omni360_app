@@ -7,6 +7,7 @@ import '../providers/campaigns_provider.dart';
 import '../models/campaign.dart';
 import '../utils/pace_alerts.dart';
 import 'campaign_detail.dart';
+import 'campaign_create.dart';
 
 // ── Sort enum ─────────────────────────────────────────────────────────────────
 
@@ -144,6 +145,19 @@ class _CampaignsScreenState extends ConsumerState<CampaignsScreen> {
               tooltip: 'Сортировка',
             ),
             orElse: () => const SizedBox.shrink(),
+          ),
+          IconButton(
+            icon: const Icon(Icons.add_rounded, color: kAccent),
+            tooltip: 'Создать кампанию',
+            onPressed: () async {
+              final created = await Navigator.of(context).push<bool>(
+                MaterialPageRoute(
+                    builder: (_) => const CampaignCreateScreen()),
+              );
+              if (created == true && context.mounted) {
+                ref.read(campaignsProvider.notifier).fetch();
+              }
+            },
           ),
           IconButton(
             icon: const Icon(Icons.refresh_rounded, color: kTextSecondary),
