@@ -96115,13 +96115,14 @@ e.n(0,"segments",A.c([],t.H7))
 d=m.dy
 if(d.length!==0){c=A.a1(d).h("a3<1,p>")
 d=A.a6(new A.a3(d,new A.arC(),c),c.h("ax.E"))
-e.n(0,"cities",d)}d=A.c([m.fr],t.s)
-c=m.fx
-c=A.aA(["start",B.e.ar(c.a),"end",B.e.ar(c.b)],g,t.S)
-b=m.fy
-b=A.a6(b,A.l(b).c)
-e.n(0,"targetAudience",A.aA(["enabled",!0,"gender",d,"ageRange",c,"income",b],g,t.K))
-l=e
+e.n(0,"cities",d)}d=m.fy
+if(d.a!==0||m.fr!=="ALL"){c=A.z(g,t.K)
+c.n(0,"enabled",!0)
+c.n(0,"gender",A.c([m.fr],t.s))
+b=m.fx
+c.n(0,"ageRange",A.aA(["start",B.e.ar(b.a),"end",B.e.ar(b.b)],g,t.S))
+if(d.a!==0){g=A.a6(d,A.l(d).c)
+c.n(0,"income",g)}e.n(0,"targetAudience",c)}l=e
 p=4
 g=$.pR().a
 g===$&&A.a()
