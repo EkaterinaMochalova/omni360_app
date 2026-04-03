@@ -94,12 +94,11 @@ class _CampaignCreateScreenState
     }
     setState(() { _saving = true; _error = null; });
 
-    final fmt = DateFormat('yyyy-MM-dd HH:mm:ss');
     final body = <String, dynamic>{
       'name': _nameCtrl.text.trim(),
       'type': _type,
-      'startDate': fmt.format(_startDate!),
-      'endDate': fmt.format(_endDate!.copyWith(hour: 23, minute: 59, second: 59)),
+      'startDate': '${_startDate!.toIso8601String().substring(0, 10)}T00:00:00',
+      'endDate': '${_endDate!.toIso8601String().substring(0, 10)}T23:59:59',
       if (_customer != null) 'customerId': _customer!.id,
       if (_brand != null) 'brandId': _brand!.id,
       if (_budgetCtrl.text.isNotEmpty)
