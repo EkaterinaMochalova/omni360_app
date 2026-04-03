@@ -96111,6 +96111,7 @@ if(d.length!==0)e.n(0,"dailyOts",A.oE(A.dJ(d," ","")))
 e.n(0,"strategy",m.db)
 d=m.dx.a.a
 if(d.length!==0)e.n(0,"commonBid",A.oE(A.dJ(d," ","")))
+e.n(0,"segments",A.c([],t.H7))
 d=m.dy
 if(d.length!==0){c=A.a1(d).h("a3<1,p>")
 d=A.a6(new A.a3(d,new A.arC(),c),c.h("ax.E"))
