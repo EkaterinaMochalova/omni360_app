@@ -114,12 +114,13 @@ class _CampaignCreateScreenState
         'commonBid': double.tryParse(_bidCtrl.text.replaceAll(' ', '')),
       'segments': <Map<String, dynamic>>[],
       if (_regions.isNotEmpty) 'cities': _regions.map((r) => r.id).toList(),
-      'targetAudience': {
-        'enabled': true,
-        'gender': [_gender],
-        'ageRange': {'start': _ageRange.start.round(), 'end': _ageRange.end.round()},
-        'income': _income.toList(),
-      },
+      if (_income.isNotEmpty || _gender != 'ALL')
+        'targetAudience': {
+          'enabled': true,
+          'gender': [_gender],
+          'ageRange': {'start': _ageRange.start.round(), 'end': _ageRange.end.round()},
+          if (_income.isNotEmpty) 'income': _income.toList(),
+        },
     };
 
     try {
