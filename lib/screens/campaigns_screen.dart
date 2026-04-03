@@ -406,20 +406,17 @@ class _FilterBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
         color: Colors.white,
-        height: 44,
-        child: ListView.separated(
-          scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-          itemCount: filters.length,
-          separatorBuilder: (context, index) => const SizedBox(width: 8),
-          itemBuilder: (_, i) {
-            final f = filters[i];
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Wrap(
+          spacing: 8,
+          runSpacing: 6,
+          children: filters.map((f) {
             final sel = f == selected;
             return GestureDetector(
               onTap: () => onSelect(f),
               child: Container(
                 padding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                 decoration: BoxDecoration(
                   color: sel ? kAccent : Colors.white,
                   borderRadius: BorderRadius.circular(20),
@@ -435,7 +432,7 @@ class _FilterBar extends StatelessWidget {
                 ),
               ),
             );
-          },
+          }).toList(),
         ),
       );
 }
