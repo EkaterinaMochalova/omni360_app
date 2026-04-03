@@ -488,7 +488,7 @@ class _SmallStat extends StatelessWidget {
 
 // ── Pace alerts ───────────────────────────────────────────────────────────────
 
-enum _PaceType { over, under }
+enum _PaceType { over, under, noExits }
 
 class _PaceAlert {
   final String metric;
@@ -535,21 +535,26 @@ List<_PaceAlert> _buildAlerts(Campaign campaign, CampaignStats s) {
     check('Бюджет', campaign.dailyBudget ?? 0, s.factDailyBudget);
   }
 
-  if (s.hourlyOtsPlan > 0 && s.hourlyOtsFact > 0) {
+  // OTS: проверяем темп только если есть плановые OTS
+  if (s.planOts > 0 && s.hourlyOtsPlan > 0 && s.hourlyOtsFact > 0) {
     final pace = s.hourlyOtsFact / s.hourlyOtsPlan;
     if (pace > 1.25) alerts.add(_PaceAlert('OTS/час', _PaceType.over, (pace - 1) * 100));
     if (pace < 0.7)  alerts.add(_PaceAlert('OTS/час', _PaceType.under, (1 - pace) * 100));
-  } else if (s.factOts > 0) {
+  } else if (s.planOts > 0 && s.factOts > 0) {
     check('OTS', s.planOts, s.factOts);
   }
 
-  if (s.hourlyExitsFact > 0) {
-    final planHourlyExits = (campaign.exits ?? 0) / 14; // 14 активных часов
-    if (planHourlyExits > 0) {
-      final pace = s.hourlyExitsFact / planHourlyExits;
-      if (pace > 1.25) alerts.add(_PaceAlert('Выходы/час', _PaceType.over, (pace - 1) * 100));
-      if (pace < 0.7)  alerts.add(_PaceAlert('Выходы/час', _PaceType.under, (1 - pace) * 100));
-    }
+  // Выходы: темп если есть плановые выходы
+  final planHourlyExits = (campaign.exits ?? 0) / 14;
+  if (s.hourlyExitsFact > 0 && planHourlyExits > 0) {
+    final pace = s.hourlyExitsFact / planHourlyExits;
+    if (pace > 1.25) alerts.add(_PaceAlert('Выходы/час', _PaceType.over, (pace - 1) * 100));
+    if (pace < 0.7)  alerts.add(_PaceAlert('Выходы/час', _PaceType.under, (1 - pace) * 100));
+  }
+
+  // Нет выходов за последний час (кампания активна, но в текущем часу 0 выходов)
+  if (campaign.isActive && s.factExits > 0 && s.hourlyExitsFact == 0) {
+    alerts.add(_PaceAlert('Выходы', _PaceType.noExits, 0));
   }
 
   return alerts;
@@ -561,11 +566,22 @@ class _AlertBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isNoExits = alert.type == _PaceType.noExits;
     final isOver = alert.type == _PaceType.over;
-    final color = isOver ? const Color(0xFFC62828) : const Color(0xFF1565C0);
-    final bg = isOver ? const Color(0xFFFFEBEE) : const Color(0xFFE3F2FD);
-    final icon = isOver ? '⚡' : '📉';
-    final label = isOver ? 'Перерасход' : 'Недотрата';
+    final color = isNoExits
+        ? const Color(0xFFE65100)
+        : isOver
+            ? const Color(0xFFC62828)
+            : const Color(0xFF1565C0);
+    final bg = isNoExits
+        ? const Color(0xFFFFF3E0)
+        : isOver
+            ? const Color(0xFFFFEBEE)
+            : const Color(0xFFE3F2FD);
+    final icon = isNoExits ? '⚠️' : isOver ? '⚡' : '📉';
+    final text = isNoExits
+        ? 'Нет выходов за последний час'
+        : '${isOver ? 'Перерасход' : 'Недотрата'} ${alert.metric}: ${alert.pct.toStringAsFixed(0)}% от ожидаемого темпа';
 
     return Container(
       margin: const EdgeInsets.only(bottom: 6),
@@ -581,7 +597,7 @@ class _AlertBanner extends StatelessWidget {
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              '$label ${alert.metric}: ${alert.pct.toStringAsFixed(0)}% от ожидаемого темпа',
+              text,
               style: TextStyle(
                   color: color, fontSize: 12, fontWeight: FontWeight.w500),
             ),
