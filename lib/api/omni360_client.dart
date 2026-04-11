@@ -64,7 +64,7 @@ class Omni360Client {
     }
 
     options.baseUrl = Uri.base.origin;
-    options.path = '/api-proxy$path';
+    options.path = '/.netlify/functions/omniboard$path';
   }
 
   static bool _shouldUseNetlifyProxy(String host) {
