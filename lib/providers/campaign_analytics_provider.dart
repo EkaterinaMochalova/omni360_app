@@ -205,9 +205,16 @@ class CampaignAnalyticsController
     final baseParams = <String, dynamic>{
       'page': query.page,
       'size': query.size,
-      if (query.states.isNotEmpty) 'states': query.states.toList(),
-      if (query.failureReasons.isNotEmpty)
-        'failureReasonsType': query.failureReasons.toList(),
+      'states': query.states.toList(),
+      'failureReasonsType': query.failureReasons.toList(),
+      'cities': const <int>[],
+      'creatives': const <int>[],
+      'creativeContents': const <int>[],
+      'customerIds': const <int>[],
+      'withPlatformFee': false,
+      'withShots': false,
+      'asc': false,
+      'orderBy': 'showTime',
     };
 
     final attempts = <Map<String, dynamic>>[
@@ -271,10 +278,16 @@ class CampaignAnalyticsController
 
   static String? _extractServerDetails(DioException error) {
     final data = error.response?.data;
+    final uri = error.requestOptions.uri.toString();
+    final status = error.response?.statusCode;
+    final statusMessage = error.response?.statusMessage;
     if (data == null) return null;
     if (data is String && data.trim().isNotEmpty) return data;
     if (data is Map<String, dynamic>) {
       final values = [
+        if (status != null)
+          'HTTP $status${statusMessage == null ? '' : ' $statusMessage'}',
+        'URL: $uri',
         data['message']?.toString(),
         data['error']?.toString(),
         data['details']?.toString(),
@@ -283,7 +296,12 @@ class CampaignAnalyticsController
         return values.join('\n');
       }
     }
-    return data.toString();
+    return [
+      if (status != null)
+        'HTTP $status${statusMessage == null ? '' : ' $statusMessage'}',
+      'URL: $uri',
+      data.toString(),
+    ].join('\n');
   }
 }
 
