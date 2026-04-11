@@ -12,8 +12,12 @@ class CampaignsNotifier extends StateNotifier<AsyncValue<List<Campaign>>> {
     fetch();
   }
 
-  Future<void> fetch() async {
-    state = const AsyncValue.loading();
+  Future<List<Campaign>?> fetch({bool silent = false}) async {
+    final previous = state.asData?.value;
+    if (!silent || previous == null) {
+      state = const AsyncValue.loading();
+    }
+
     try {
       final all = <dynamic>[];
       int page = 0;
@@ -45,47 +49,61 @@ class CampaignsNotifier extends StateNotifier<AsyncValue<List<Campaign>>> {
         all.addAll(chunk);
         page++;
       } while (page < totalPages);
-
-      state = AsyncValue.data(
-        all.map((e) => Campaign.fromJson(e as Map<String, dynamic>)).toList(),
-      );
+      final campaigns = all
+          .map((e) => Campaign.fromJson(e as Map<String, dynamic>))
+          .toList();
+      state = AsyncValue.data(campaigns);
+      return campaigns;
     } catch (e, st) {
-      state = AsyncValue.error(e, st);
+      if (!silent || previous == null) {
+        state = AsyncValue.error(e, st);
+      }
+      return previous;
     }
   }
 
   Future<void> changeState(String id, String newState) async {
-    await _client.dio
-        .post('/api/v1.0/clients/campaigns/$id/state/$newState');
+    await _client.dio.post('/api/v1.0/clients/campaigns/$id/state/$newState');
     await fetch(); // refresh list
   }
 }
 
 final campaignsProvider =
     StateNotifierProvider<CampaignsNotifier, AsyncValue<List<Campaign>>>(
-  (_) => CampaignsNotifier(),
-);
+      (_) => CampaignsNotifier(),
+    );
 
 // --- Single campaign detail ---
 
-final campaignDetailProvider =
-    FutureProvider.family<Campaign, String>((ref, id) async {
-  final response =
-      await Omni360Client().dio.get('/api/v1.0/clients/campaigns/$id');
+final campaignDetailProvider = FutureProvider.family<Campaign, String>((
+  ref,
+  id,
+) async {
+  final response = await Omni360Client().dio.get(
+    '/api/v1.0/clients/campaigns/$id',
+  );
   final data = response.data as Map<String, dynamic>;
   // ignore: avoid_print
-  print('[DEBUG detail] budgetBuyer=${data['budgetBuyer']} totalBudget=${data['totalBudget']}');
+  print(
+    '[DEBUG detail] budgetBuyer=${data['budgetBuyer']} totalBudget=${data['totalBudget']}',
+  );
   // ignore: avoid_print
-  print('[DEBUG detail] maxImpressionsCount=${data['maxImpressionsCount']} maxDailyImpressionsCount=${data['maxDailyImpressionsCount']}');
+  print(
+    '[DEBUG detail] maxImpressionsCount=${data['maxImpressionsCount']} maxDailyImpressionsCount=${data['maxDailyImpressionsCount']}',
+  );
   // ignore: avoid_print
-  print('[DEBUG detail] strategy=${data['strategy']} segments=${data['segments']}');
+  print(
+    '[DEBUG detail] strategy=${data['strategy']} segments=${data['segments']}',
+  );
   return Campaign.fromJson(data);
 });
 
 // --- Campaign stats via GET /impression-stats ---
 
-final campaignStatsProvider =
-    FutureProvider.family<CampaignStats, String>((ref, id) async {
+final campaignStatsProvider = FutureProvider.family<CampaignStats, String>((
+  ref,
+  id,
+) async {
   try {
     final response = await Omni360Client().dio.get(
       '/api/v1.0/clients/campaigns/$id/impression-stats',
@@ -101,4 +119,3 @@ final campaignStatsProvider =
   }
   return CampaignStats.empty();
 });
-
