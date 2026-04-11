@@ -155,6 +155,14 @@ class CampaignAnalyticsController
           ),
         ),
       );
+    } on DioException catch (e, st) {
+      final serverDetails = _extractServerDetails(e);
+      state = state.copyWith(
+        impressions: AsyncValue.error(
+          serverDetails == null ? e : Exception(serverDetails),
+          st,
+        ),
+      );
     } catch (e, st) {
       state = state.copyWith(impressions: AsyncValue.error(e, st));
     }
@@ -205,8 +213,18 @@ class CampaignAnalyticsController
     final attempts = <Map<String, dynamic>>[
       {
         ...baseParams,
-        'localStartDate': _formatLocalDateTime(query.start),
-        'localEndDate': _formatLocalDateTime(query.end),
+        'localStartDate': _formatSpaceDateTime(query.start.toLocal()),
+        'localEndDate': _formatSpaceDateTime(query.end.toLocal()),
+      },
+      {
+        ...baseParams,
+        'startDate': _formatSpaceDateTime(query.start.toUtc()),
+        'endDate': _formatSpaceDateTime(query.end.toUtc()),
+      },
+      {
+        ...baseParams,
+        'localStartDate': _formatLocalIsoDateTime(query.start),
+        'localEndDate': _formatLocalIsoDateTime(query.end),
       },
       {
         ...baseParams,
@@ -238,11 +256,34 @@ class CampaignAnalyticsController
         StateError('Failed to load campaign impressions for $campaignId');
   }
 
-  static String _formatLocalDateTime(DateTime value) {
+  static String _formatSpaceDateTime(DateTime value) {
+    String pad(int n) => n.toString().padLeft(2, '0');
+    return '${value.year}-${pad(value.month)}-${pad(value.day)} '
+        '${pad(value.hour)}:${pad(value.minute)}:${pad(value.second)}';
+  }
+
+  static String _formatLocalIsoDateTime(DateTime value) {
     final local = value.toLocal();
     String pad(int n) => n.toString().padLeft(2, '0');
     return '${local.year}-${pad(local.month)}-${pad(local.day)}T'
         '${pad(local.hour)}:${pad(local.minute)}:${pad(local.second)}';
+  }
+
+  static String? _extractServerDetails(DioException error) {
+    final data = error.response?.data;
+    if (data == null) return null;
+    if (data is String && data.trim().isNotEmpty) return data;
+    if (data is Map<String, dynamic>) {
+      final values = [
+        data['message']?.toString(),
+        data['error']?.toString(),
+        data['details']?.toString(),
+      ].where((value) => value != null && value.trim().isNotEmpty).toList();
+      if (values.isNotEmpty) {
+        return values.join('\n');
+      }
+    }
+    return data.toString();
   }
 }
 
