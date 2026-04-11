@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
@@ -145,18 +146,7 @@ class CampaignAnalyticsController
 
     try {
       final query = state.query;
-      final response = await _client.dio.get(
-        '/api/v1.0/clients/campaigns/$campaignId/impressions',
-        queryParameters: {
-          'startDate': _formatDateTime(query.start),
-          'endDate': _formatDateTime(query.end),
-          if (query.states.isNotEmpty) 'states': query.states.toList(),
-          if (query.failureReasons.isNotEmpty)
-            'failureReasonsType': query.failureReasons.toList(),
-          'page': query.page,
-          'size': query.size,
-        },
-      );
+      final response = await _fetchImpressionsWithFallback(query);
 
       state = state.copyWith(
         impressions: AsyncValue.data(
@@ -201,10 +191,57 @@ class CampaignAnalyticsController
     await _savePrefs(prefs);
   }
 
-  static String _formatDateTime(DateTime value) {
+  Future<dynamic> _fetchImpressionsWithFallback(
+    CampaignAnalyticsQuery query,
+  ) async {
+    final baseParams = <String, dynamic>{
+      'page': query.page,
+      'size': query.size,
+      if (query.states.isNotEmpty) 'states': query.states.toList(),
+      if (query.failureReasons.isNotEmpty)
+        'failureReasonsType': query.failureReasons.toList(),
+    };
+
+    final attempts = <Map<String, dynamic>>[
+      {
+        ...baseParams,
+        'localStartDate': _formatLocalDateTime(query.start),
+        'localEndDate': _formatLocalDateTime(query.end),
+      },
+      {
+        ...baseParams,
+        'startDate': query.start.toUtc().toIso8601String(),
+        'endDate': query.end.toUtc().toIso8601String(),
+      },
+      baseParams,
+    ];
+
+    DioException? lastBadRequest;
+
+    for (final params in attempts) {
+      try {
+        return await _client.dio.get(
+          '/api/v1.0/clients/campaigns/$campaignId/impressions',
+          queryParameters: params,
+          options: Options(listFormat: ListFormat.multi),
+        );
+      } on DioException catch (e) {
+        if (e.response?.statusCode == 400) {
+          lastBadRequest = e;
+          continue;
+        }
+        rethrow;
+      }
+    }
+
+    throw lastBadRequest ??
+        StateError('Failed to load campaign impressions for $campaignId');
+  }
+
+  static String _formatLocalDateTime(DateTime value) {
     final local = value.toLocal();
     String pad(int n) => n.toString().padLeft(2, '0');
-    return '${local.year}-${pad(local.month)}-${pad(local.day)} '
+    return '${local.year}-${pad(local.month)}-${pad(local.day)}T'
         '${pad(local.hour)}:${pad(local.minute)}:${pad(local.second)}';
   }
 }
