@@ -16,10 +16,10 @@ class TimeSlot {
   int get endHour => (relativeEndTime / 3600).ceil().clamp(0, 24);
 
   factory TimeSlot.fromJson(Map<String, dynamic> json) => TimeSlot(
-        dayOfWeek: (json['dayOfWeek'] as num?)?.toInt() ?? 1,
-        relativeStartTime: (json['relativeStartTime'] as num?)?.toInt() ?? 0,
-        relativeEndTime: (json['relativeEndTime'] as num?)?.toInt() ?? 86400,
-      );
+    dayOfWeek: (json['dayOfWeek'] as num?)?.toInt() ?? 1,
+    relativeStartTime: (json['relativeStartTime'] as num?)?.toInt() ?? 0,
+    relativeEndTime: (json['relativeEndTime'] as num?)?.toInt() ?? 86400,
+  );
 }
 
 class Campaign {
@@ -27,6 +27,10 @@ class Campaign {
   final String name;
   final String status;
   final String? advertiser;
+  final int? customerId;
+  final String? customerName;
+  final int? brandId;
+  final String? brandName;
   final double? budget;
   final double? dailyBudget;
   final double? spent;
@@ -36,6 +40,9 @@ class Campaign {
   final String? endDate;
   final String? type;
   final String? city;
+  final List<int> displayOwnerIds;
+  final List<String> displayOwners;
+  final List<String> formats;
   final List<TimeSlot>? timeSettings;
 
   const Campaign({
@@ -43,6 +50,10 @@ class Campaign {
     required this.name,
     required this.status,
     this.advertiser,
+    this.customerId,
+    this.customerName,
+    this.brandId,
+    this.brandName,
     this.budget,
     this.dailyBudget,
     this.spent,
@@ -52,33 +63,55 @@ class Campaign {
     this.endDate,
     this.type,
     this.city,
+    this.displayOwnerIds = const [],
+    this.displayOwners = const [],
+    this.formats = const [],
     this.timeSettings,
   });
 
-  factory Campaign.fromJson(Map<String, dynamic> json) => Campaign(
-        id: (json['id'] ?? json['campaignId'] ?? '').toString(),
-        name: json['name'] ?? json['title'] ?? 'Без названия',
-        status: json['state']?.toString() ?? json['status']?.toString() ?? 'unknown',
-        advertiser: (json['customer'] as Map?)?['name']?.toString() ??
-            (json['brand'] as Map?)?['name']?.toString() ??
-            json['advertiser']?.toString() ??
-            json['advertiserName']?.toString() ??
-            json['clientName']?.toString(),
-        budget: _toDouble(json['totalBudget'] ?? json['budget']),
-        dailyBudget: _toDouble(json['dailyBudget'] ?? json['budgetPerDay']),
-        spent: _toDouble(json['spent'] ?? json['spentBudget']),
-        ots: _toDouble(json['maxImpressionsCount'] ?? json['ots'] ?? json['totalOts'])
-            ?? _otsFromSegments(json['segments']),
-        exits: _toDouble(json['exits'] ?? json['totalExits'] ?? json['plays']),
-        startDate: _trimDate(json['startDate']?.toString()),
-        endDate: _trimDate(json['endDate']?.toString()),
-        type: json['type']?.toString(),
-        city: json['city']?.toString() ??
-            (json['targetCity'] as Map?)?['name']?.toString(),
-        timeSettings: (json['timeSettings'] as List?)
-            ?.map((e) => TimeSlot.fromJson(e as Map<String, dynamic>))
-            .toList(),
-      );
+  factory Campaign.fromJson(Map<String, dynamic> json) {
+    final customer = json['customer'] as Map?;
+    final brand = json['brand'] as Map?;
+    final displayOwners = _extractDisplayOwners(json);
+
+    return Campaign(
+      id: (json['id'] ?? json['campaignId'] ?? '').toString(),
+      name: json['name'] ?? json['title'] ?? 'Без названия',
+      status:
+          json['state']?.toString() ?? json['status']?.toString() ?? 'unknown',
+      advertiser:
+          customer?['name']?.toString() ??
+          brand?['name']?.toString() ??
+          json['advertiser']?.toString() ??
+          json['advertiserName']?.toString() ??
+          json['clientName']?.toString(),
+      customerId: (customer?['id'] as num?)?.toInt(),
+      customerName: customer?['name']?.toString(),
+      brandId: (brand?['id'] as num?)?.toInt(),
+      brandName: brand?['name']?.toString(),
+      budget: _toDouble(json['totalBudget'] ?? json['budget']),
+      dailyBudget: _toDouble(json['dailyBudget'] ?? json['budgetPerDay']),
+      spent: _toDouble(json['spent'] ?? json['spentBudget']),
+      ots:
+          _toDouble(
+            json['maxImpressionsCount'] ?? json['ots'] ?? json['totalOts'],
+          ) ??
+          _otsFromSegments(json['segments']),
+      exits: _toDouble(json['exits'] ?? json['totalExits'] ?? json['plays']),
+      startDate: _trimDate(json['startDate']?.toString()),
+      endDate: _trimDate(json['endDate']?.toString()),
+      type: json['type']?.toString(),
+      city:
+          json['city']?.toString() ??
+          (json['targetCity'] as Map?)?['name']?.toString(),
+      displayOwnerIds: displayOwners.$1,
+      displayOwners: displayOwners.$2,
+      formats: _extractFormats(json),
+      timeSettings: (json['timeSettings'] as List?)
+          ?.map((e) => TimeSlot.fromJson(e as Map<String, dynamic>))
+          .toList(),
+    );
+  }
 
   /// Сумма OTS по всем инвентарям во всех сегментах (единиц × 1000 контактов)
   static double? _otsFromSegments(dynamic segments) {
@@ -93,6 +126,61 @@ class Campaign {
       }
     }
     return total > 0 ? total * 1000 : null; // ots в тысячах контактов
+  }
+
+  static (List<int>, List<String>) _extractDisplayOwners(
+    Map<String, dynamic> json,
+  ) {
+    final ids = <int>{};
+    final names = <String>{};
+
+    void addFrom(dynamic value) {
+      if (value is Map) {
+        final id = (value['id'] as num?)?.toInt();
+        final name = value['name']?.toString();
+        if (id != null) ids.add(id);
+        if (name != null && name.isNotEmpty) names.add(name);
+      }
+    }
+
+    for (final owner in json['displayOwners'] as List? ?? const []) {
+      addFrom(owner);
+    }
+
+    for (final segment in json['segments'] as List? ?? const []) {
+      final segmentMap = segment as Map?;
+      addFrom(segmentMap?['displayOwner']);
+      addFrom(segmentMap?['displayOwnerDTO']);
+    }
+
+    return (ids.toList()..sort(), names.toList()..sort());
+  }
+
+  static List<String> _extractFormats(Map<String, dynamic> json) {
+    final formats = <String>{};
+
+    void add(dynamic value) {
+      final stringValue = value?.toString();
+      if (stringValue != null && stringValue.isNotEmpty) {
+        formats.add(stringValue);
+      }
+    }
+
+    add(json['format']);
+    for (final value in json['formats'] as List? ?? const []) {
+      add(value);
+    }
+    for (final segment in json['segments'] as List? ?? const []) {
+      final segmentMap = segment as Map?;
+      add(segmentMap?['format']);
+      for (final inventory in segmentMap?['inventories'] as List? ?? const []) {
+        final inventoryMap = inventory as Map?;
+        add(inventoryMap?['format']);
+        add(inventoryMap?['inventoryFormat']);
+      }
+    }
+
+    return formats.toList()..sort();
   }
 
   static String? _trimDate(String? raw) {
@@ -168,22 +256,22 @@ class Campaign {
 /// Статистика кампании из GET /impression-stats
 class CampaignStats {
   // ПЛАН
-  final double planBudget;       // budget
-  final double planDailyBudget;  // dailyBudget
-  final double planOts;          // otsCount
+  final double planBudget; // budget
+  final double planDailyBudget; // dailyBudget
+  final double planOts; // otsCount
 
   // ФАКТ
-  final double factBudget;       // totalBudgetShowed
-  final double factDailyBudget;  // dailyBudgetShowed
-  final double factOts;          // otsCountShowed
-  final int factExits;           // totalCountShowed (кол-во выходов)
+  final double factBudget; // totalBudgetShowed
+  final double factDailyBudget; // dailyBudgetShowed
+  final double factOts; // otsCountShowed
+  final int factExits; // totalCountShowed (кол-во выходов)
 
   // Часовые показатели (для расчёта темпа)
-  final double hourlyBudgetPlan;    // hourlyBudget
-  final double hourlyBudgetFact;    // hourlyBudgetShowed
-  final double hourlyOtsPlan;       // hourlyOts
-  final double hourlyOtsFact;       // hourlyOtsShowed
-  final int    hourlyExitsFact;     // hourlyCountShowed
+  final double hourlyBudgetPlan; // hourlyBudget
+  final double hourlyBudgetFact; // hourlyBudgetShowed
+  final double hourlyOtsPlan; // hourlyOts
+  final double hourlyOtsFact; // hourlyOtsShowed
+  final int hourlyExitsFact; // hourlyCountShowed
 
   // Дополнительно
   final double cpm;
@@ -216,35 +304,47 @@ class CampaignStats {
     final factOts = _n(json['otsCountShowed']) > 0
         ? _n(json['otsCountShowed'])
         : _n(json['totalDmpOts']) > 0
-            ? _n(json['totalDmpOts'])
-            : _n(json['totalEstimatedOts']);
+        ? _n(json['totalDmpOts'])
+        : _n(json['totalEstimatedOts']);
 
     return CampaignStats(
-      planBudget:      _n(json['budget']) > 0 ? _n(json['budget']) : _n(reserved?['budget']),
-      planDailyBudget: _n(json['dailyBudget']) > 0 ? _n(json['dailyBudget']) : _n(reserved?['dailyBudget']),
-      planOts:         planOts,
-      factBudget:      _n(json['totalBudgetShowed']),
+      planBudget: _n(json['budget']) > 0
+          ? _n(json['budget'])
+          : _n(reserved?['budget']),
+      planDailyBudget: _n(json['dailyBudget']) > 0
+          ? _n(json['dailyBudget'])
+          : _n(reserved?['dailyBudget']),
+      planOts: planOts,
+      factBudget: _n(json['totalBudgetShowed']),
       factDailyBudget: _n(json['dailyBudgetShowed']),
-      factOts:         factOts,
-      factExits:       _n(json['totalCountShowed']).toInt(),
+      factOts: factOts,
+      factExits: _n(json['totalCountShowed']).toInt(),
       hourlyBudgetPlan: _n(json['hourlyBudget']),
       hourlyBudgetFact: _n(json['hourlyBudgetShowed']),
-      hourlyOtsPlan:    _n(json['hourlyOts']),
-      hourlyOtsFact:    _n(json['hourlyOtsShowed']),
-      hourlyExitsFact:  _n(json['hourlyCountShowed']).toInt(),
-      cpm:             _n(json['cpm']),
+      hourlyOtsPlan: _n(json['hourlyOts']),
+      hourlyOtsFact: _n(json['hourlyOtsShowed']),
+      hourlyExitsFact: _n(json['hourlyCountShowed']).toInt(),
+      cpm: _n(json['cpm']),
       daily: const [],
     );
   }
 
   factory CampaignStats.empty() => const CampaignStats(
-        planBudget: 0, planDailyBudget: 0, planOts: 0,
-        factBudget: 0, factDailyBudget: 0, factOts: 0,
-        factExits: 0,
-        hourlyBudgetPlan: 0, hourlyBudgetFact: 0,
-        hourlyOtsPlan: 0, hourlyOtsFact: 0, hourlyExitsFact: 0,
-        cpm: 0, daily: [],
-      );
+    planBudget: 0,
+    planDailyBudget: 0,
+    planOts: 0,
+    factBudget: 0,
+    factDailyBudget: 0,
+    factOts: 0,
+    factExits: 0,
+    hourlyBudgetPlan: 0,
+    hourlyBudgetFact: 0,
+    hourlyOtsPlan: 0,
+    hourlyOtsFact: 0,
+    hourlyExitsFact: 0,
+    cpm: 0,
+    daily: [],
+  );
 
   static double _n(dynamic v) {
     if (v == null) return 0;
@@ -267,8 +367,8 @@ class DailyStat {
   });
 
   factory DailyStat.fromJson(Map<String, dynamic> json) => DailyStat(
-        date: json['date']?.toString() ?? '',
-        impressions: (json['impressions'] as num?)?.toInt() ?? 0,
-        spent: (json['spent'] as num?)?.toDouble() ?? 0.0,
-      );
+    date: json['date']?.toString() ?? '',
+    impressions: (json['impressions'] as num?)?.toInt() ?? 0,
+    spent: (json['spent'] as num?)?.toDouble() ?? 0.0,
+  );
 }

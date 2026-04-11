@@ -12,6 +12,7 @@ import '../utils/campaign_notifications.dart';
 import '../utils/pace_alerts.dart';
 import 'campaign_detail.dart';
 import 'campaign_create.dart';
+import 'service_dashboard_screen.dart';
 
 // ── Sort enum ─────────────────────────────────────────────────────────────────
 
@@ -427,6 +428,21 @@ class _CampaignsScreenState extends ConsumerState<CampaignsScreen> {
         ),
         titleSpacing: 16,
         actions: [
+          _HeaderActionButton(
+            tooltip: 'Сервисный дашборд',
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => const ServiceDashboardScreen(),
+                ),
+              );
+            },
+            child: const Icon(
+              Icons.space_dashboard_rounded,
+              color: kTextSecondary,
+              size: 20,
+            ),
+          ),
           _HeaderActionButton(
             tooltip: _notificationsEnabled
                 ? 'Уведомления'
