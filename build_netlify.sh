@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-FLUTTER_VERSION="3.32.0"
+FLUTTER_VERSION="3.41.6"
 FLUTTER_DIR="$HOME/flutter"
 
 echo "==> Preparing Flutter $FLUTTER_VERSION"
