@@ -425,13 +425,14 @@ class _CampaignsScreenState extends ConsumerState<CampaignsScreen> {
             fontSize: 20,
           ),
         ),
+        titleSpacing: 16,
         actions: [
-          IconButton(
+          _HeaderActionButton(
             tooltip: _notificationsEnabled
                 ? 'Уведомления'
                 : 'Уведомления выключены',
-            onPressed: _openNotifications,
-            icon: Stack(
+            onTap: _openNotifications,
+            child: Stack(
               clipBehavior: Clip.none,
               children: [
                 Icon(
@@ -439,19 +440,21 @@ class _CampaignsScreenState extends ConsumerState<CampaignsScreen> {
                       ? Icons.notifications_none_rounded
                       : Icons.notifications_off_outlined,
                   color: kTextSecondary,
+                  size: 21,
                 ),
                 if (_notificationsEnabled && _unreadNotifications > 0)
                   Positioned(
-                    right: -2,
-                    top: -2,
+                    right: -6,
+                    top: -7,
                     child: Container(
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 5,
+                        horizontal: 4,
                         vertical: 1,
                       ),
                       decoration: BoxDecoration(
                         color: Colors.redAccent,
                         borderRadius: BorderRadius.circular(999),
+                        border: Border.all(color: Colors.white, width: 1.5),
                       ),
                       constraints: const BoxConstraints(
                         minWidth: 16,
@@ -464,7 +467,7 @@ class _CampaignsScreenState extends ConsumerState<CampaignsScreen> {
                         textAlign: TextAlign.center,
                         style: const TextStyle(
                           color: Colors.white,
-                          fontSize: 10,
+                          fontSize: 9,
                           fontWeight: FontWeight.w700,
                         ),
                       ),
@@ -475,17 +478,20 @@ class _CampaignsScreenState extends ConsumerState<CampaignsScreen> {
           ),
           // Sort button
           campaigns.maybeWhen(
-            data: (_) => IconButton(
-              icon: const Icon(Icons.sort_rounded, color: kTextSecondary),
-              onPressed: () => _showSortSheet(context),
+            data: (_) => _HeaderActionButton(
               tooltip: 'Сортировка',
+              onTap: () => _showSortSheet(context),
+              child: const Icon(
+                Icons.sort_rounded,
+                color: kTextSecondary,
+                size: 20,
+              ),
             ),
             orElse: () => const SizedBox.shrink(),
           ),
-          IconButton(
-            icon: const Icon(Icons.add_rounded, color: kAccent),
+          _HeaderActionButton(
             tooltip: 'Создать кампанию',
-            onPressed: () async {
+            onTap: () async {
               final created = await Navigator.of(context).push<bool>(
                 MaterialPageRoute(builder: (_) => const CampaignCreateScreen()),
               );
@@ -493,15 +499,27 @@ class _CampaignsScreenState extends ConsumerState<CampaignsScreen> {
                 ref.read(campaignsProvider.notifier).fetch();
               }
             },
+            child: const Icon(Icons.add_rounded, color: kAccent, size: 21),
           ),
-          IconButton(
-            icon: const Icon(Icons.refresh_rounded, color: kTextSecondary),
-            onPressed: () => ref.read(campaignsProvider.notifier).fetch(),
+          _HeaderActionButton(
+            tooltip: 'Обновить',
+            onTap: () => ref.read(campaignsProvider.notifier).fetch(),
+            child: const Icon(
+              Icons.refresh_rounded,
+              color: kTextSecondary,
+              size: 20,
+            ),
           ),
-          IconButton(
-            icon: const Icon(Icons.logout_rounded, color: kTextSecondary),
-            onPressed: () => ref.read(authProvider.notifier).logout(),
+          _HeaderActionButton(
+            tooltip: 'Выйти',
+            onTap: () => ref.read(authProvider.notifier).logout(),
+            child: const Icon(
+              Icons.logout_rounded,
+              color: kTextSecondary,
+              size: 20,
+            ),
           ),
+          const SizedBox(width: 8),
         ],
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(104),
@@ -1110,4 +1128,34 @@ class _Metric extends StatelessWidget {
       ),
     ],
   );
+}
+
+class _HeaderActionButton extends StatelessWidget {
+  final String tooltip;
+  final VoidCallback onTap;
+  final Widget child;
+
+  const _HeaderActionButton({
+    required this.tooltip,
+    required this.onTap,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: Padding(
+        padding: const EdgeInsets.only(right: 4),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: onTap,
+            child: SizedBox(width: 36, height: 36, child: Center(child: child)),
+          ),
+        ),
+      ),
+    );
+  }
 }
