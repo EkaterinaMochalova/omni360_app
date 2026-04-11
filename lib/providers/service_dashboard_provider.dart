@@ -90,14 +90,10 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
         return;
       }
 
-      final response = await _fetchCampaignStats(
+      final summaries = await _fetchCampaignStats(
         filteredCampaigns,
         state.query,
       );
-      final summaries = (response.data as List? ?? const [])
-          .whereType<Map<String, dynamic>>()
-          .map(ServiceDashboardCampaignSummary.fromJson)
-          .toList();
 
       state = state.copyWith(summaries: AsyncValue.data(summaries));
     } catch (e, st) {
@@ -105,33 +101,50 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
     }
   }
 
-  Future<Response<dynamic>> _fetchCampaignStats(
+  Future<List<ServiceDashboardCampaignSummary>> _fetchCampaignStats(
     List<Campaign> campaigns,
     ServiceDashboardQuery query,
   ) async {
-    final reqList = <String, dynamic>{
-      'campaignIds': campaigns
-          .map((campaign) => int.tryParse(campaign.id))
-          .whereType<int>()
-          .toList(),
-      'startDate': _formatSpaceDateTime(query.start.toUtc()),
-      'endDate': _formatSpaceDateTime(query.end.toUtc()),
-      'cities': const <int>[],
-      'creatives': const <int>[],
-      'creativeContents': const <int>[],
-      'states': const <String>[],
-      'groupMode': 'SUMMARY',
-      'page': 0,
-      'size': campaigns.length.clamp(1, 2000).toInt(),
-      'priceMode': 'CUSTOMER_CHARGE_INCLUDED',
-      'withPlatformFee': false,
-    };
+    final campaignIds = campaigns
+        .map((campaign) => int.tryParse(campaign.id))
+        .whereType<int>()
+        .toList();
+    if (campaignIds.isEmpty) return const [];
 
-    return _client.dio.get(
-      '/api/v1.0/clients/impressions/campaigns-stats',
-      queryParameters: {'reqList': jsonEncode(reqList)},
-      options: Options(listFormat: ListFormat.multi),
-    );
+    const chunkSize = 40;
+    final summaries = <ServiceDashboardCampaignSummary>[];
+
+    for (var i = 0; i < campaignIds.length; i += chunkSize) {
+      final chunk = campaignIds.skip(i).take(chunkSize).toList();
+      final reqList = <String, dynamic>{
+        'campaignIds': chunk,
+        'startDate': _formatSpaceDateTime(query.start.toUtc()),
+        'endDate': _formatSpaceDateTime(query.end.toUtc()),
+        'cities': const <int>[],
+        'creatives': const <int>[],
+        'creativeContents': const <int>[],
+        'states': const <String>[],
+        'groupMode': 'SUMMARY',
+        'page': 0,
+        'size': chunk.length,
+        'priceMode': 'CUSTOMER_CHARGE_INCLUDED',
+        'withPlatformFee': false,
+      };
+
+      final response = await _client.dio.get(
+        '/api/v1.0/clients/impressions/campaigns-stats',
+        queryParameters: {'reqList': jsonEncode(reqList)},
+        options: Options(listFormat: ListFormat.multi),
+      );
+
+      summaries.addAll(
+        (response.data as List? ?? const [])
+            .whereType<Map<String, dynamic>>()
+            .map(ServiceDashboardCampaignSummary.fromJson),
+      );
+    }
+
+    return summaries;
   }
 
   Future<void> setRange(DateTime start, DateTime end) async {
