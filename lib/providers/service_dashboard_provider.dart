@@ -69,9 +69,10 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
       final campaigns =
           await _ref.read(campaignsProvider.notifier).fetch(silent: true) ??
           const <Campaign>[];
+      final extraFilters = await _loadReferenceFilters();
       state = state.copyWith(
         campaigns: AsyncValue.data(campaigns),
-        filters: _buildFilters(campaigns),
+        filters: _buildFilters(campaigns, extraFilters: extraFilters),
       );
     } catch (e, st) {
       state = state.copyWith(campaigns: AsyncValue.error(e, st));
@@ -210,7 +211,66 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
     }).toList();
   }
 
-  static ServiceDashboardFiltersData _buildFilters(List<Campaign> campaigns) {
+  Future<ServiceDashboardFiltersData> _loadReferenceFilters() async {
+    try {
+      final responses = await Future.wait([
+        _client.dio.get(
+          '/api/v1.0/clients/regions',
+          queryParameters: {'page': 0, 'size': 500},
+        ),
+        _client.dio.get(
+          '/api/v1.0/clients/display-owners/names',
+          queryParameters: {
+            'reqList': jsonEncode({'page': 0, 'size': 500}),
+          },
+        ),
+      ]);
+
+      final regionResponse = responses[0].data;
+      final operatorsResponse = responses[1].data;
+
+      final cities = _extractNamedItems(regionResponse);
+      final operators = _extractNamedItems(operatorsResponse);
+
+      return ServiceDashboardFiltersData(
+        brands: const [],
+        advertisers: const [],
+        operators: operators,
+        cities: cities,
+        formats: const [],
+      );
+    } catch (_) {
+      return const ServiceDashboardFiltersData(
+        brands: [],
+        advertisers: [],
+        operators: [],
+        cities: [],
+        formats: [],
+      );
+    }
+  }
+
+  static List<String> _extractNamedItems(dynamic data) {
+    final rawItems = switch (data) {
+      List<dynamic> _ => data,
+      {'content': List<dynamic> content} => content,
+      {'data': List<dynamic> items} => items,
+      _ => const <dynamic>[],
+    };
+
+    return rawItems
+        .whereType<Map<String, dynamic>>()
+        .map((item) => item['name']?.toString() ?? '')
+        .where((name) => name.isNotEmpty)
+        .toSet()
+        .toList()
+      ..sort();
+  }
+
+  static ServiceDashboardFiltersData _buildFilters(
+    List<Campaign> campaigns, {
+    ServiceDashboardFiltersData? extraFilters,
+  }) {
     final brands = <String>{};
     final advertisers = <String>{};
     final operators = <String>{};
@@ -231,6 +291,11 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
         cities.add(campaign.city!);
       }
       formats.addAll(campaign.formats.where((value) => value.isNotEmpty));
+    }
+
+    if (extraFilters != null) {
+      operators.addAll(extraFilters.operators);
+      cities.addAll(extraFilters.cities);
     }
 
     List<String> sorted(Set<String> values) => values.toList()..sort();
