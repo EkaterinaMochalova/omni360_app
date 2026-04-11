@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import '../main.dart';
 import '../providers/campaigns_provider.dart';
 import '../models/campaign.dart';
+import 'campaign_analytics_screen.dart';
 import '../widgets/stats_chart.dart';
 import '../utils/pace_alerts.dart';
 
@@ -74,6 +75,8 @@ class CampaignDetailScreen extends ConsumerWidget {
                 orElse: () =>
                     _DetailedStatsCard(campaign: campaign, stats: null),
               ),
+              const SizedBox(height: 12),
+              _AuctionAnalyticsCard(campaign: campaign),
               const SizedBox(height: 12),
               // Daily chart
               stats.maybeWhen(
@@ -609,6 +612,52 @@ class _DetailedStatsCard extends StatelessWidget {
   static double? _ratio(double? plan, double? fact) {
     if (plan == null || fact == null || plan <= 0 || fact <= 0) return null;
     return fact / plan;
+  }
+}
+
+class _AuctionAnalyticsCard extends StatelessWidget {
+  final Campaign campaign;
+
+  const _AuctionAnalyticsCard({required this.campaign});
+
+  @override
+  Widget build(BuildContext context) {
+    return _Card(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Аукцион и запросы',
+            style: TextStyle(
+              color: kTextPrimary,
+              fontSize: 15,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            'Подробно по каждому запросу, победам, проигрышам и настраиваемому дашборду',
+            style: TextStyle(color: kTextSecondary, fontSize: 12),
+          ),
+          const SizedBox(height: 12),
+          FilledButton.icon(
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => CampaignAnalyticsScreen(
+                    campaignId: campaign.id,
+                    campaignName: campaign.name,
+                  ),
+                ),
+              );
+            },
+            style: FilledButton.styleFrom(backgroundColor: kAccent),
+            icon: const Icon(Icons.query_stats_rounded),
+            label: const Text('Открыть аналитику запросов'),
+          ),
+        ],
+      ),
+    );
   }
 }
 
