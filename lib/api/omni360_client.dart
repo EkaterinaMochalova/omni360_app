@@ -15,7 +15,7 @@ class Omni360Client {
   Omni360Client._internal() {
     _dio = Dio(
       BaseOptions(
-        baseUrl: _resolveBaseUrl(),
+        baseUrl: _baseUrl,
         connectTimeout: const Duration(seconds: 30),
         receiveTimeout: const Duration(seconds: 60),
         headers: {'Content-Type': 'application/json'},
@@ -25,6 +25,7 @@ class Omni360Client {
     _dio.interceptors.add(
       InterceptorsWrapper(
         onRequest: (options, handler) async {
+          _rewriteAnalyticsRequestForNetlify(options);
           final token = await _storage.read(key: _tokenKey);
           if (token != null) {
             options.headers['Authorization'] = 'Bearer $token';
@@ -48,11 +49,22 @@ class Omni360Client {
 
   Future<void> deleteToken() => _storage.delete(key: _tokenKey);
 
-  static String _resolveBaseUrl() {
-    if (kIsWeb && _shouldUseNetlifyProxy(Uri.base.host)) {
-      return '/api-proxy';
+  static void _rewriteAnalyticsRequestForNetlify(RequestOptions options) {
+    if (!kIsWeb || !_shouldUseNetlifyProxy(Uri.base.host)) {
+      return;
     }
-    return _baseUrl;
+
+    final path = options.path;
+    final isAuctionAnalyticsRequest =
+        path.contains('/api/v1.0/clients/campaigns/') &&
+        (path.endsWith('/filters-list') || path.endsWith('/impressions'));
+
+    if (!isAuctionAnalyticsRequest) {
+      return;
+    }
+
+    options.baseUrl = Uri.base.origin;
+    options.path = '/api-proxy$path';
   }
 
   static bool _shouldUseNetlifyProxy(String host) {
