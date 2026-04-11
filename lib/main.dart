@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'providers/auth_provider.dart';
+import 'services/app_notifications_service.dart';
 import 'screens/login_screen.dart';
 import 'screens/campaigns_screen.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await AppNotificationsService.instance.initialize();
   runApp(const ProviderScope(child: Omni360App()));
 }
 
@@ -55,8 +58,8 @@ class _AuthGate extends ConsumerWidget {
       AuthStatus.authenticated => const CampaignsScreen(),
       AuthStatus.unauthenticated => const LoginScreen(),
       AuthStatus.unknown => const Scaffold(
-          body: Center(child: CircularProgressIndicator(color: kAccent)),
-        ),
+        body: Center(child: CircularProgressIndicator(color: kAccent)),
+      ),
     };
   }
 }
