@@ -28668,7 +28668,7 @@ else r=!1
 if(!r)return
 q=A.GM()
 a.sL2(q.gy_(q))
-a.cx="/api-proxy"+s},
+a.cx="/.netlify/functions/omniboard"+s},
 ajD:function ajD(){this.a=$},
 ajE:function ajE(a){this.a=a},
 ajF:function ajF(){},
