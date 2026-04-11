@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -81,7 +82,7 @@ class CampaignAnalyticsScreen extends ConsumerWidget {
                 child: Padding(
                   padding: const EdgeInsets.all(24),
                   child: Text(
-                    'Не удалось загрузить аукционную аналитику.\n$e',
+                    _buildErrorMessage(e),
                     textAlign: TextAlign.center,
                     style: const TextStyle(color: kTextSecondary),
                   ),
@@ -293,6 +294,14 @@ class CampaignAnalyticsScreen extends ConsumerWidget {
         ),
       ),
     );
+  }
+
+  String _buildErrorMessage(Object error) {
+    final base = 'Не удалось загрузить аукционную аналитику.';
+    if (kIsWeb && Uri.base.host.endsWith('github.io')) {
+      return '$base\n\nДля web-версии на GitHub Pages backend OmniBoard блокирует часть запросов CORS-ограничениями. Открой Netlify deploy, где запросы идут через proxy.';
+    }
+    return '$base\n$error';
   }
 }
 

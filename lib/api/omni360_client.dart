@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
@@ -12,26 +13,30 @@ class Omni360Client {
   final _storage = const FlutterSecureStorage();
 
   Omni360Client._internal() {
-    _dio = Dio(BaseOptions(
-      baseUrl: _baseUrl,
-      connectTimeout: const Duration(seconds: 30),
-      receiveTimeout: const Duration(seconds: 60),
-      headers: {'Content-Type': 'application/json'},
-    ));
+    _dio = Dio(
+      BaseOptions(
+        baseUrl: _resolveBaseUrl(),
+        connectTimeout: const Duration(seconds: 30),
+        receiveTimeout: const Duration(seconds: 60),
+        headers: {'Content-Type': 'application/json'},
+      ),
+    );
 
-    _dio.interceptors.add(InterceptorsWrapper(
-      onRequest: (options, handler) async {
-        final token = await _storage.read(key: _tokenKey);
-        if (token != null) {
-          options.headers['Authorization'] = 'Bearer $token';
-        }
-        return handler.next(options);
-      },
-      onError: (error, handler) {
-        // 401 will be handled by providers/screens
-        return handler.next(error);
-      },
-    ));
+    _dio.interceptors.add(
+      InterceptorsWrapper(
+        onRequest: (options, handler) async {
+          final token = await _storage.read(key: _tokenKey);
+          if (token != null) {
+            options.headers['Authorization'] = 'Bearer $token';
+          }
+          return handler.next(options);
+        },
+        onError: (error, handler) {
+          // 401 will be handled by providers/screens
+          return handler.next(error);
+        },
+      ),
+    );
   }
 
   Dio get dio => _dio;
@@ -42,4 +47,15 @@ class Omni360Client {
   Future<String?> getToken() => _storage.read(key: _tokenKey);
 
   Future<void> deleteToken() => _storage.delete(key: _tokenKey);
+
+  static String _resolveBaseUrl() {
+    if (kIsWeb && _shouldUseNetlifyProxy(Uri.base.host)) {
+      return '/api-proxy';
+    }
+    return _baseUrl;
+  }
+
+  static bool _shouldUseNetlifyProxy(String host) {
+    return host.endsWith('.netlify.app') || host.contains('netlify');
+  }
 }
