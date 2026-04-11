@@ -12,6 +12,8 @@ class CampaignAnalyticsQuery {
   final DateTime end;
   final Set<String> states;
   final Set<String> failureReasons;
+  final String address;
+  final String inventoryGid;
   final int page;
   final int size;
 
@@ -20,6 +22,8 @@ class CampaignAnalyticsQuery {
     required this.end,
     required this.states,
     required this.failureReasons,
+    required this.address,
+    required this.inventoryGid,
     required this.page,
     required this.size,
   });
@@ -31,6 +35,8 @@ class CampaignAnalyticsQuery {
       end: now,
       states: const {},
       failureReasons: const {},
+      address: '',
+      inventoryGid: '',
       page: 0,
       size: 50,
     );
@@ -41,6 +47,8 @@ class CampaignAnalyticsQuery {
     DateTime? end,
     Set<String>? states,
     Set<String>? failureReasons,
+    String? address,
+    String? inventoryGid,
     int? page,
     int? size,
   }) {
@@ -49,6 +57,8 @@ class CampaignAnalyticsQuery {
       end: end ?? this.end,
       states: states ?? this.states,
       failureReasons: failureReasons ?? this.failureReasons,
+      address: address ?? this.address,
+      inventoryGid: inventoryGid ?? this.inventoryGid,
       page: page ?? this.page,
       size: size ?? this.size,
     );
@@ -189,6 +199,20 @@ class CampaignAnalyticsController
     await fetchImpressions();
   }
 
+  Future<void> setScreenFilters({
+    required String address,
+    required String inventoryGid,
+  }) async {
+    state = state.copyWith(
+      query: state.query.copyWith(
+        address: address.trim(),
+        inventoryGid: inventoryGid.trim(),
+        page: 0,
+      ),
+    );
+    await fetchImpressions();
+  }
+
   Future<void> setPage(int page) async {
     state = state.copyWith(query: state.query.copyWith(page: page));
     await fetchImpressions();
@@ -215,6 +239,8 @@ class CampaignAnalyticsController
       'withShots': false,
       'asc': false,
       'orderBy': 'showTime',
+      if (query.address.isNotEmpty) 'address': query.address,
+      if (query.inventoryGid.isNotEmpty) 'inventoryGid': query.inventoryGid,
     };
 
     final attempts = <Map<String, dynamic>>[

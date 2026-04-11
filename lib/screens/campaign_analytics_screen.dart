@@ -176,6 +176,8 @@ class CampaignAnalyticsScreen extends ConsumerWidget {
 
     final selectedStates = Set<String>.from(state.query.states);
     final selectedReasons = Set<String>.from(state.query.failureReasons);
+    final addressCtrl = TextEditingController(text: state.query.address);
+    final gidCtrl = TextEditingController(text: state.query.inventoryGid);
 
     showModalBottomSheet(
       context: context,
@@ -203,6 +205,32 @@ class CampaignAnalyticsScreen extends ConsumerWidget {
                     ),
                   ),
                   const SizedBox(height: 12),
+                  const Text(
+                    'Экран',
+                    style: TextStyle(
+                      color: kTextPrimary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: addressCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Адрес',
+                      hintText: 'Например: Ленинский пр-т, дом 31',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: gidCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'GID экрана',
+                      hintText: 'Например: 2006-04-10-...',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
                   const Text(
                     'Статусы',
                     style: TextStyle(
@@ -269,6 +297,10 @@ class CampaignAnalyticsScreen extends ConsumerWidget {
                           selectedReasons.clear();
                           controller.setStates({});
                           controller.setFailureReasons({});
+                          controller.setScreenFilters(
+                            address: '',
+                            inventoryGid: '',
+                          );
                           Navigator.pop(context);
                         },
                         child: const Text('Сбросить'),
@@ -276,6 +308,10 @@ class CampaignAnalyticsScreen extends ConsumerWidget {
                       const Spacer(),
                       FilledButton(
                         onPressed: () async {
+                          await controller.setScreenFilters(
+                            address: addressCtrl.text,
+                            inventoryGid: gidCtrl.text,
+                          );
                           await controller.setStates(selectedStates);
                           await controller.setFailureReasons(selectedReasons);
                           if (context.mounted) {
@@ -384,6 +420,14 @@ class _AnalyticsBody extends StatelessWidget {
     final successes = records
         .where((record) => record.state == 'SUCCESS')
         .length;
+    final lossRate = records.isEmpty ? 0.0 : losses / records.length;
+    final hasScreenFilter =
+        state.query.address.isNotEmpty || state.query.inventoryGid.isNotEmpty;
+    final selectedScreenLabel = [
+      if (state.query.address.isNotEmpty) state.query.address,
+      if (state.query.inventoryGid.isNotEmpty)
+        'GID: ${state.query.inventoryGid}',
+    ].join(' • ');
 
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -391,6 +435,7 @@ class _AnalyticsBody extends StatelessWidget {
         if (state.prefs.showSummary)
           _CardSection(
             title: 'Сводка',
+            subtitle: hasScreenFilter ? selectedScreenLabel : null,
             child: Wrap(
               spacing: 10,
               runSpacing: 10,
@@ -398,6 +443,11 @@ class _AnalyticsBody extends StatelessWidget {
                 _MetricCard(label: 'Запросов', value: '${page.totalElements}'),
                 _MetricCard(label: 'Победы', value: '$wins'),
                 _MetricCard(label: 'Проигрыши', value: '$losses'),
+                if (hasScreenFilter)
+                  _MetricCard(
+                    label: 'Процент проигрышей',
+                    value: '${(lossRate * 100).toStringAsFixed(1)}%',
+                  ),
                 _MetricCard(label: 'Успешные показы', value: '$successes'),
               ],
             ),
