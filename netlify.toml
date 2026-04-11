@@ -3,6 +3,12 @@
   publish   = "build/web"
 
 [[redirects]]
+  from   = "/api-proxy/*"
+  to     = "/.netlify/functions/omniboard/:splat"
+  status = 200
+  force  = true
+
+[[redirects]]
   from   = "/*"
   to     = "/index.html"
   status = 200
