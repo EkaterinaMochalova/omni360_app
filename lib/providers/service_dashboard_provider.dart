@@ -117,32 +117,90 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
 
     for (var i = 0; i < campaignIds.length; i += chunkSize) {
       final chunk = campaignIds.skip(i).take(chunkSize).toList();
-      final reqList = <String, dynamic>{
-        'campaignIds': chunk,
-        'startDate': _formatSpaceDateTime(query.start.toUtc()),
-        'endDate': _formatSpaceDateTime(query.end.toUtc()),
-        'cities': const <int>[],
-        'creatives': const <int>[],
-        'creativeContents': const <int>[],
-        'states': const <String>[],
-        'groupMode': 'SUMMARY',
-        'page': 0,
-        'size': chunk.length,
-        'priceMode': 'CUSTOMER_CHARGE_INCLUDED',
-        'withPlatformFee': false,
-      };
+      try {
+        summaries.addAll(await _fetchStatsChunk(chunk, query));
+      } on DioException catch (e) {
+        final status = e.response?.statusCode ?? 0;
+        if (status >= 500) {
+          final fallbackCampaigns = campaigns
+              .where((campaign) => chunk.contains(int.tryParse(campaign.id)))
+              .toList();
+          summaries.addAll(
+            await _fetchCampaignStatsIndividually(fallbackCampaigns),
+          );
+        } else {
+          rethrow;
+        }
+      }
+    }
 
-      final response = await _client.dio.get(
-        '/api/v1.0/clients/impressions/campaigns-stats',
-        queryParameters: {'reqList': jsonEncode(reqList)},
-        options: Options(listFormat: ListFormat.multi),
-      );
+    return summaries;
+  }
 
-      summaries.addAll(
-        (response.data as List? ?? const [])
-            .whereType<Map<String, dynamic>>()
-            .map(ServiceDashboardCampaignSummary.fromJson),
-      );
+  Future<List<ServiceDashboardCampaignSummary>> _fetchStatsChunk(
+    List<int> campaignIds,
+    ServiceDashboardQuery query,
+  ) async {
+    final reqList = <String, dynamic>{
+      'campaignIds': campaignIds,
+      'startDate': _formatSpaceDateTime(query.start.toUtc()),
+      'endDate': _formatSpaceDateTime(query.end.toUtc()),
+      'cities': const <int>[],
+      'creatives': const <int>[],
+      'creativeContents': const <int>[],
+      'states': const <String>[],
+      'groupMode': 'SUMMARY',
+      'page': 0,
+      'size': campaignIds.length,
+      'priceMode': 'CUSTOMER_CHARGE_INCLUDED',
+      'withPlatformFee': false,
+    };
+
+    final response = await _client.dio.get(
+      '/api/v1.0/clients/impressions/campaigns-stats',
+      queryParameters: {'reqList': jsonEncode(reqList)},
+      options: Options(listFormat: ListFormat.multi),
+    );
+
+    return (response.data as List? ?? const [])
+        .whereType<Map<String, dynamic>>()
+        .map(ServiceDashboardCampaignSummary.fromJson)
+        .toList();
+  }
+
+  Future<List<ServiceDashboardCampaignSummary>> _fetchCampaignStatsIndividually(
+    List<Campaign> campaigns,
+  ) async {
+    final summaries = <ServiceDashboardCampaignSummary>[];
+
+    for (final campaign in campaigns) {
+      try {
+        final response = await _client.dio.get(
+          '/api/v1.0/clients/campaigns/${campaign.id}/impression-stats',
+          queryParameters: const {'reqList': '{}'},
+        );
+        final data = response.data as Map<String, dynamic>;
+        final stats = CampaignStats.fromImpressionStats(data);
+        summaries.add(
+          ServiceDashboardCampaignSummary(
+            campaignId: int.tryParse(campaign.id) ?? 0,
+            campaignName: campaign.name,
+            budget: stats.planBudget > 0
+                ? stats.planBudget
+                : (campaign.budget ?? 0),
+            spent: stats.factBudget,
+            impressions: stats.factExits,
+            ots: stats.factOts.round(),
+            showPrice: stats.factExits > 0
+                ? stats.factBudget / stats.factExits
+                : 0,
+            cpm: stats.cpm,
+          ),
+        );
+      } catch (_) {
+        // Skip campaigns whose individual stats are unavailable instead of
+        // failing the whole dashboard.
+      }
     }
 
     return summaries;
