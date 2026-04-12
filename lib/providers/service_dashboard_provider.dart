@@ -31,6 +31,8 @@ class ServiceDashboardState {
       operators: [],
       cities: [],
       formats: [],
+      operatorIds: {},
+      cityIds: {},
     ),
   );
 
@@ -94,6 +96,7 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
       final summaries = await _fetchCampaignStats(
         filteredCampaigns,
         state.query,
+        state.filters,
       );
 
       state = state.copyWith(summaries: AsyncValue.data(summaries));
@@ -105,13 +108,14 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
   Future<List<ServiceDashboardCampaignSummary>> _fetchCampaignStats(
     List<Campaign> campaigns,
     ServiceDashboardQuery query,
+    ServiceDashboardFiltersData filters,
   ) async {
     const chunkSize = 40;
     final chunkFutures = <Future<List<ServiceDashboardCampaignSummary>>>[];
 
     for (var i = 0; i < campaigns.length; i += chunkSize) {
       final chunk = campaigns.skip(i).take(chunkSize).toList();
-      chunkFutures.add(_fetchStatsForCampaignChunk(chunk, query));
+      chunkFutures.add(_fetchStatsForCampaignChunk(chunk, query, filters));
     }
 
     final chunkResults = await Future.wait(chunkFutures);
@@ -121,6 +125,7 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
   Future<List<ServiceDashboardCampaignSummary>> _fetchStatsForCampaignChunk(
     List<Campaign> campaigns,
     ServiceDashboardQuery query,
+    ServiceDashboardFiltersData filters,
   ) async {
     final campaignIds = campaigns
         .map((campaign) => int.tryParse(campaign.id))
@@ -129,7 +134,7 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
     if (campaignIds.isEmpty) return const [];
 
     try {
-      return await _fetchStatsChunk(campaignIds, query);
+      return await _fetchStatsChunk(campaignIds, query, filters);
     } on DioException catch (e) {
       final status = e.response?.statusCode ?? 0;
       if (status < 500) rethrow;
@@ -142,8 +147,8 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
       final left = campaigns.sublist(0, middle);
       final right = campaigns.sublist(middle);
       final parts = await Future.wait([
-        _fetchStatsForCampaignChunk(left, query),
-        _fetchStatsForCampaignChunk(right, query),
+        _fetchStatsForCampaignChunk(left, query, filters),
+        _fetchStatsForCampaignChunk(right, query, filters),
       ]);
       return parts.expand((items) => items).toList();
     }
@@ -152,12 +157,23 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
   Future<List<ServiceDashboardCampaignSummary>> _fetchStatsChunk(
     List<int> campaignIds,
     ServiceDashboardQuery query,
+    ServiceDashboardFiltersData filters,
   ) async {
+    final selectedCityIds = query.cities
+        .map((name) => filters.cityIds[name])
+        .whereType<int>()
+        .toList();
+    final selectedOperatorIds = query.operators
+        .map((name) => filters.operatorIds[name])
+        .whereType<int>()
+        .toList();
+
     final reqList = <String, dynamic>{
       'campaignIds': campaignIds,
       'startDate': _formatSpaceDateTime(query.start.toUtc()),
       'endDate': _formatSpaceDateTime(query.end.toUtc()),
-      'cities': const <int>[],
+      'cities': selectedCityIds,
+      'displayOwnerIds': selectedOperatorIds,
       'creatives': const <int>[],
       'creativeContents': const <int>[],
       'states': const <String>[],
@@ -227,10 +243,12 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
               query.advertisers.contains(campaign.customerName));
       final matchesOperator =
           query.operators.isEmpty ||
+          campaign.displayOwners.isEmpty ||
           campaign.displayOwners.any(query.operators.contains);
       final matchesCity =
           query.cities.isEmpty ||
-          (campaign.city != null && query.cities.contains(campaign.city));
+          campaign.city == null ||
+          query.cities.contains(campaign.city);
       final matchesFormat =
           query.formats.isEmpty || campaign.formats.any(query.formats.contains);
 
@@ -270,6 +288,8 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
         operators: operators,
         cities: cities,
         formats: const [],
+        operatorIds: _extractNamedIdMap(operatorsResponse),
+        cityIds: _extractNamedIdMap(regionResponse),
       );
     } catch (_) {
       return const ServiceDashboardFiltersData(
@@ -278,8 +298,29 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
         operators: [],
         cities: [],
         formats: [],
+        operatorIds: {},
+        cityIds: {},
       );
     }
+  }
+
+  static Map<String, int> _extractNamedIdMap(dynamic data) {
+    final rawItems = switch (data) {
+      List<dynamic> _ => data,
+      {'content': List<dynamic> content} => content,
+      {'data': List<dynamic> items} => items,
+      _ => const <dynamic>[],
+    };
+
+    final result = <String, int>{};
+    for (final item in rawItems.whereType<Map<String, dynamic>>()) {
+      final name = item['name']?.toString();
+      final id = (item['id'] as num?)?.toInt();
+      if (name != null && name.isNotEmpty && id != null) {
+        result[name] = id;
+      }
+    }
+    return result;
   }
 
   static List<String> _extractNamedItems(dynamic data) {
@@ -338,6 +379,8 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
       operators: sorted(operators),
       cities: sorted(cities),
       formats: sorted(formats),
+      operatorIds: extraFilters?.operatorIds ?? const {},
+      cityIds: extraFilters?.cityIds ?? const {},
     );
   }
 
