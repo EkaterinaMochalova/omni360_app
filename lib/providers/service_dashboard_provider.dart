@@ -106,35 +106,47 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
     List<Campaign> campaigns,
     ServiceDashboardQuery query,
   ) async {
+    const chunkSize = 40;
+    final chunkFutures = <Future<List<ServiceDashboardCampaignSummary>>>[];
+
+    for (var i = 0; i < campaigns.length; i += chunkSize) {
+      final chunk = campaigns.skip(i).take(chunkSize).toList();
+      chunkFutures.add(_fetchStatsForCampaignChunk(chunk, query));
+    }
+
+    final chunkResults = await Future.wait(chunkFutures);
+    return chunkResults.expand((items) => items).toList();
+  }
+
+  Future<List<ServiceDashboardCampaignSummary>> _fetchStatsForCampaignChunk(
+    List<Campaign> campaigns,
+    ServiceDashboardQuery query,
+  ) async {
     final campaignIds = campaigns
         .map((campaign) => int.tryParse(campaign.id))
         .whereType<int>()
         .toList();
     if (campaignIds.isEmpty) return const [];
 
-    const chunkSize = 40;
-    final summaries = <ServiceDashboardCampaignSummary>[];
+    try {
+      return await _fetchStatsChunk(campaignIds, query);
+    } on DioException catch (e) {
+      final status = e.response?.statusCode ?? 0;
+      if (status < 500) rethrow;
 
-    for (var i = 0; i < campaignIds.length; i += chunkSize) {
-      final chunk = campaignIds.skip(i).take(chunkSize).toList();
-      try {
-        summaries.addAll(await _fetchStatsChunk(chunk, query));
-      } on DioException catch (e) {
-        final status = e.response?.statusCode ?? 0;
-        if (status >= 500) {
-          final fallbackCampaigns = campaigns
-              .where((campaign) => chunk.contains(int.tryParse(campaign.id)))
-              .toList();
-          summaries.addAll(
-            await _fetchCampaignStatsIndividually(fallbackCampaigns),
-          );
-        } else {
-          rethrow;
-        }
+      if (campaigns.length == 1) {
+        return [ServiceDashboardCampaignSummary.fromCampaign(campaigns.first)];
       }
-    }
 
-    return summaries;
+      final middle = campaigns.length ~/ 2;
+      final left = campaigns.sublist(0, middle);
+      final right = campaigns.sublist(middle);
+      final parts = await Future.wait([
+        _fetchStatsForCampaignChunk(left, query),
+        _fetchStatsForCampaignChunk(right, query),
+      ]);
+      return parts.expand((items) => items).toList();
+    }
   }
 
   Future<List<ServiceDashboardCampaignSummary>> _fetchStatsChunk(
@@ -166,44 +178,6 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
         .whereType<Map<String, dynamic>>()
         .map(ServiceDashboardCampaignSummary.fromJson)
         .toList();
-  }
-
-  Future<List<ServiceDashboardCampaignSummary>> _fetchCampaignStatsIndividually(
-    List<Campaign> campaigns,
-  ) async {
-    final summaries = <ServiceDashboardCampaignSummary>[];
-
-    for (final campaign in campaigns) {
-      try {
-        final response = await _client.dio.get(
-          '/api/v1.0/clients/campaigns/${campaign.id}/impression-stats',
-          queryParameters: const {'reqList': '{}'},
-        );
-        final data = response.data as Map<String, dynamic>;
-        final stats = CampaignStats.fromImpressionStats(data);
-        summaries.add(
-          ServiceDashboardCampaignSummary(
-            campaignId: int.tryParse(campaign.id) ?? 0,
-            campaignName: campaign.name,
-            budget: stats.planBudget > 0
-                ? stats.planBudget
-                : (campaign.budget ?? 0),
-            spent: stats.factBudget,
-            impressions: stats.factExits,
-            ots: stats.factOts.round(),
-            showPrice: stats.factExits > 0
-                ? stats.factBudget / stats.factExits
-                : 0,
-            cpm: stats.cpm,
-          ),
-        );
-      } catch (_) {
-        // Skip campaigns whose individual stats are unavailable instead of
-        // failing the whole dashboard.
-      }
-    }
-
-    return summaries;
   }
 
   Future<void> setRange(DateTime start, DateTime end) async {
