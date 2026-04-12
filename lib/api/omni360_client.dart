@@ -55,13 +55,16 @@ class Omni360Client {
     }
 
     final path = options.path;
+    final isCampaignReadRequest =
+        options.method.toUpperCase() == 'GET' &&
+        path.startsWith('/api/v1.0/clients/campaigns');
     final isAuctionAnalyticsRequest =
         (path.contains('/api/v1.0/clients/campaigns/') &&
             (path.endsWith('/filters-list') ||
                 path.endsWith('/impressions'))) ||
         path.contains('/api/v1.0/clients/impressions/campaigns-stats');
 
-    if (!isAuctionAnalyticsRequest) {
+    if (!isCampaignReadRequest && !isAuctionAnalyticsRequest) {
       return;
     }
 
