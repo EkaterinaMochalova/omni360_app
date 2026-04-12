@@ -1,3 +1,5 @@
+import 'campaign.dart';
+
 class ServiceDashboardQuery {
   final DateTime start;
   final DateTime end;
@@ -92,6 +94,26 @@ class ServiceDashboardCampaignSummary {
           0,
       showPrice: _toDouble(json['showPrice']),
       cpm: _toDouble(json['cpm']),
+    );
+  }
+
+  factory ServiceDashboardCampaignSummary.fromCampaign(Campaign campaign) {
+    final budget = campaign.budget ?? 0;
+    final spent = campaign.spent ?? 0;
+    final impressions = (campaign.exits ?? 0).round();
+    final ots = (campaign.ots ?? 0).round();
+    final averageShowPrice = impressions > 0 ? spent / impressions : 0.0;
+    final cpm = impressions > 0 ? (spent / impressions) * 1000 : 0.0;
+
+    return ServiceDashboardCampaignSummary(
+      campaignId: int.tryParse(campaign.id) ?? 0,
+      campaignName: campaign.name,
+      budget: budget,
+      spent: spent,
+      impressions: impressions,
+      ots: ots,
+      showPrice: averageShowPrice,
+      cpm: cpm,
     );
   }
 
