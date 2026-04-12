@@ -152,6 +152,8 @@ class ServiceDashboardFiltersData {
   final List<String> operators;
   final List<String> cities;
   final List<String> formats;
+  final Map<String, int> operatorIds;
+  final Map<String, int> cityIds;
 
   const ServiceDashboardFiltersData({
     required this.brands,
@@ -159,5 +161,7 @@ class ServiceDashboardFiltersData {
     required this.operators,
     required this.cities,
     required this.formats,
+    this.operatorIds = const {},
+    this.cityIds = const {},
   });
 }
