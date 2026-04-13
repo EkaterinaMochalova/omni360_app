@@ -407,12 +407,33 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
     ServiceDashboardQuery query,
     ServiceDashboardFiltersData filters,
   ) async {
+    if (query.operators.isNotEmpty || query.cities.isNotEmpty) {
+      return _fetchFilteredInventoryFactChunk(campaigns, query, filters);
+    }
+
     const chunkSize = 50;
     final chunkFutures = <Future<List<ServiceDashboardCampaignSummary>>>[];
 
     for (var i = 0; i < campaigns.length; i += chunkSize) {
       final chunk = campaigns.skip(i).take(chunkSize).toList();
       chunkFutures.add(_fetchProcessingFactChunk(chunk, query, filters));
+    }
+
+    final chunkResults = await Future.wait(chunkFutures);
+    return chunkResults.expand((items) => items).toList();
+  }
+
+  Future<List<ServiceDashboardCampaignSummary>> _fetchFilteredInventoryFactChunk(
+    List<Campaign> campaigns,
+    ServiceDashboardQuery query,
+    ServiceDashboardFiltersData filters,
+  ) async {
+    const chunkSize = 8;
+    final chunkFutures = <Future<List<ServiceDashboardCampaignSummary>>>[];
+
+    for (var i = 0; i < campaigns.length; i += chunkSize) {
+      final chunk = campaigns.skip(i).take(chunkSize).toList();
+      chunkFutures.add(_fetchInventoryFactChunk(chunk, query, filters));
     }
 
     final chunkResults = await Future.wait(chunkFutures);
@@ -501,6 +522,92 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
     );
 
     return summaries.whereType<ServiceDashboardCampaignSummary>().toList();
+  }
+
+  Future<List<ServiceDashboardCampaignSummary>> _fetchInventoryFactChunk(
+    List<Campaign> campaigns,
+    ServiceDashboardQuery query,
+    ServiceDashboardFiltersData filters,
+  ) async {
+    final summaries = await Future.wait(
+      campaigns.map(
+        (campaign) => _fetchInventoryFactForCampaign(campaign, query, filters),
+      ),
+    );
+
+    return summaries.whereType<ServiceDashboardCampaignSummary>().toList();
+  }
+
+  Future<ServiceDashboardCampaignSummary?> _fetchInventoryFactForCampaign(
+    Campaign campaign,
+    ServiceDashboardQuery query,
+    ServiceDashboardFiltersData filters,
+  ) async {
+    final campaignId = int.tryParse(campaign.id);
+    if (campaignId == null) return null;
+
+    final selectedOperatorIds = query.operators
+        .map((name) => filters.operatorIds[name])
+        .whereType<int>()
+        .toList();
+    final selectedCityIds = query.cities
+        .map((name) => filters.cityIds[name])
+        .whereType<int>()
+        .toList();
+
+    final variants = <Map<String, dynamic>>[
+      {
+        'page': 0,
+        'size': 500,
+        'localStartDate': _formatApiDateTime(query.start),
+        'localEndDate': _formatApiDateTime(query.end),
+        if (selectedOperatorIds.isNotEmpty) 'displayOwnerIds': selectedOperatorIds,
+        if (selectedCityIds.isNotEmpty) 'cities': selectedCityIds,
+        if (query.formats.isNotEmpty) 'formats': query.formats.toList(),
+        'withPlatformFee': false,
+      },
+      {
+        'page': 0,
+        'size': 500,
+        'startDate': _formatApiDateTime(query.start.toUtc()),
+        'endDate': _formatApiDateTime(query.end.toUtc()),
+        if (selectedOperatorIds.isNotEmpty) 'displayOwnerIds': selectedOperatorIds,
+        if (selectedCityIds.isNotEmpty) 'cities': selectedCityIds,
+        if (query.formats.isNotEmpty) 'formats': query.formats.toList(),
+        'withPlatformFee': false,
+      },
+    ];
+
+    DioException? lastError;
+    for (final variant in variants) {
+      try {
+        final response = await _client.dio.get(
+          '/api/v1.0/clients/campaigns/$campaignId/impression-inventory-stats',
+          queryParameters: variant,
+          options: Options(listFormat: ListFormat.multi),
+        );
+        final data = response.data;
+        if (data is List) {
+          final rows = data.whereType<Map<String, dynamic>>().toList();
+          if (rows.isNotEmpty) {
+            return ServiceDashboardCampaignSummary.fromInventoryStats(
+              campaign,
+              rows,
+            );
+          }
+        }
+      } on DioException catch (e) {
+        lastError = e;
+      }
+    }
+
+    if (lastError != null) {
+      // ignore: avoid_print
+      print(
+        '[service-dashboard inventory-stats] campaign=$campaignId status=${lastError.response?.statusCode} data=${lastError.response?.data}',
+      );
+    }
+    return _fetchImpressionFactForCampaign(campaign, query, filters);
   }
 
   Future<ServiceDashboardCampaignSummary?> _fetchImpressionFactForCampaign(
