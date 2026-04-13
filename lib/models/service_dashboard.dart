@@ -97,6 +97,51 @@ class ServiceDashboardCampaignSummary {
     );
   }
 
+  factory ServiceDashboardCampaignSummary.fromInventoryStats(
+    Campaign campaign,
+    List<Map<String, dynamic>> rows,
+  ) {
+    final spent = rows.fold<double>(
+      0,
+      (sum, row) =>
+          sum +
+          _toDouble(
+            row['customerStats'] is Map<String, dynamic>
+                ? (row['customerStats'] as Map<String, dynamic>)['budgetShowed']
+                : row['totalShowedBudget'],
+          ),
+    );
+    final impressions = rows.fold<int>(
+      0,
+      (sum, row) => sum + ((row['totalShowed'] as num?)?.toInt() ?? 0),
+    );
+    final ots = rows.fold<int>(
+      0,
+      (sum, row) =>
+          sum +
+          ((row['totalOts'] as num?)?.toInt() ??
+              (row['totalEstimatedOts'] as num?)?.toInt() ??
+              0),
+    );
+    final weightedSpendForCpm = rows.fold<double>(
+      0,
+      (sum, row) => sum + _toDouble(row['totalShowedBudget']),
+    );
+    final showPrice = impressions > 0 ? spent / impressions : 0.0;
+    final cpm = impressions > 0 ? (weightedSpendForCpm / impressions) * 1000 : 0.0;
+
+    return ServiceDashboardCampaignSummary(
+      campaignId: int.tryParse(campaign.id) ?? 0,
+      campaignName: campaign.name,
+      budget: campaign.budget ?? 0,
+      spent: spent,
+      impressions: impressions,
+      ots: ots,
+      showPrice: showPrice,
+      cpm: cpm,
+    );
+  }
+
   factory ServiceDashboardCampaignSummary.fromCampaign(Campaign campaign) {
     final budget = campaign.budget ?? 0;
     final spent = campaign.spent ?? 0;
