@@ -180,7 +180,8 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
     final needsCityDetails =
         query.cities.isNotEmpty &&
         campaign.city == null &&
-        campaign.regionCodes.isEmpty;
+        campaign.regionCodes.isEmpty &&
+        campaign.cityIds.isEmpty;
 
     return needsOperatorDetails || needsCityDetails;
   }
@@ -210,6 +211,7 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
     return campaign.displayOwners.isNotEmpty ||
         campaign.displayOwnerIds.isNotEmpty ||
         campaign.city != null ||
+        campaign.cityIds.isNotEmpty ||
         campaign.regionCodes.isNotEmpty;
   }
 
@@ -333,6 +335,10 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
         .map((name) => filters?.operatorIds[name])
         .whereType<int>()
         .toSet();
+    final selectedCityIds = query.cities
+        .map((name) => filters?.cityIds[name])
+        .whereType<int>()
+        .toSet();
 
     return campaigns.where((campaign) {
       final matchesSearch =
@@ -349,7 +355,11 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
           query.operators.isEmpty ||
           campaign.displayOwners.any(query.operators.contains) ||
           campaign.displayOwnerIds.any(selectedOperatorIds.contains);
-      final matchesCity = _matchesSelectedCities(campaign, query.cities);
+      final matchesCity = _matchesSelectedCities(
+        campaign,
+        query.cities,
+        selectedCityIds,
+      );
       final matchesFormat =
           query.formats.isEmpty || campaign.formats.any(query.formats.contains);
 
@@ -362,11 +372,20 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
     }).toList();
   }
 
-  static bool _matchesSelectedCities(Campaign campaign, Set<String> cities) {
+  static bool _matchesSelectedCities(
+    Campaign campaign,
+    Set<String> cities,
+    Set<int> cityIds,
+  ) {
     if (cities.isEmpty) return true;
 
     final normalizedCampaignCity = _normalizeCityName(campaign.city);
     final campaignRegionCodes = campaign.regionCodes.toSet();
+    final campaignCityIds = campaign.cityIds.toSet();
+
+    if (campaignCityIds.any(cityIds.contains)) {
+      return true;
+    }
 
     for (final city in cities) {
       final normalizedSelectedCity = _normalizeCityName(city);
