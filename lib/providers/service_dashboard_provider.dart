@@ -12,6 +12,7 @@ class ServiceDashboardState {
   final AsyncValue<List<Campaign>> campaigns;
   final AsyncValue<List<ServiceDashboardCampaignSummary>> summaries;
   final AsyncValue<List<ServiceDashboardOperatorSummary>> operatorSummaries;
+  final AsyncValue<List<ServiceDashboardCitySummary>> citySummaries;
   final ServiceDashboardQuery query;
   final ServiceDashboardFiltersData filters;
 
@@ -19,6 +20,7 @@ class ServiceDashboardState {
     required this.campaigns,
     required this.summaries,
     required this.operatorSummaries,
+    required this.citySummaries,
     required this.query,
     required this.filters,
   });
@@ -27,6 +29,7 @@ class ServiceDashboardState {
     campaigns: const AsyncValue.loading(),
     summaries: const AsyncValue.loading(),
     operatorSummaries: const AsyncValue.data([]),
+    citySummaries: const AsyncValue.data([]),
     query: ServiceDashboardQuery.initial(),
     filters: const ServiceDashboardFiltersData(
       brands: [],
@@ -43,6 +46,7 @@ class ServiceDashboardState {
     AsyncValue<List<Campaign>>? campaigns,
     AsyncValue<List<ServiceDashboardCampaignSummary>>? summaries,
     AsyncValue<List<ServiceDashboardOperatorSummary>>? operatorSummaries,
+    AsyncValue<List<ServiceDashboardCitySummary>>? citySummaries,
     ServiceDashboardQuery? query,
     ServiceDashboardFiltersData? filters,
   }) {
@@ -50,6 +54,7 @@ class ServiceDashboardState {
       campaigns: campaigns ?? this.campaigns,
       summaries: summaries ?? this.summaries,
       operatorSummaries: operatorSummaries ?? this.operatorSummaries,
+      citySummaries: citySummaries ?? this.citySummaries,
       query: query ?? this.query,
       filters: filters ?? this.filters,
     );
@@ -98,6 +103,7 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
     state = state.copyWith(
       summaries: const AsyncValue.loading(),
       operatorSummaries: const AsyncValue.loading(),
+      citySummaries: const AsyncValue.loading(),
     );
     try {
       if (state.query.operators.isNotEmpty || state.query.cities.isNotEmpty) {
@@ -129,15 +135,24 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
               state.filters,
             )
           : const <ServiceDashboardOperatorSummary>[];
+      final citySummaries = state.query.cities.isNotEmpty
+          ? await _fetchCitySummaries(
+              filteredCampaigns,
+              state.query,
+              state.filters,
+            )
+          : const <ServiceDashboardCitySummary>[];
 
       state = state.copyWith(
         summaries: AsyncValue.data(summaries),
         operatorSummaries: AsyncValue.data(operatorSummaries),
+        citySummaries: AsyncValue.data(citySummaries),
       );
     } catch (e, st) {
       state = state.copyWith(
         summaries: AsyncValue.error(e, st),
         operatorSummaries: AsyncValue.error(e, st),
+        citySummaries: AsyncValue.error(e, st),
       );
     }
   }
@@ -706,6 +721,64 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
     return result;
   }
 
+  Future<List<ServiceDashboardCitySummary>> _fetchCitySummaries(
+    List<Campaign> campaigns,
+    ServiceDashboardQuery query,
+    ServiceDashboardFiltersData filters,
+  ) async {
+    final selectedCities = query.cities
+        .map((name) => MapEntry(name, filters.cityIds[name]))
+        .where((entry) => entry.value != null)
+        .map((entry) => MapEntry(entry.key, entry.value!))
+        .toList();
+    final selectedOperatorIds = query.operators
+        .map((name) => filters.operatorIds[name])
+        .whereType<int>()
+        .toList();
+
+    if (selectedCities.isEmpty) return const [];
+
+    final aggregates = <int, _CityAggregate>{};
+    const batchSize = 8;
+
+    for (final city in selectedCities) {
+      for (var i = 0; i < campaigns.length; i += batchSize) {
+        final chunk = campaigns.skip(i).take(batchSize).toList();
+        final chunkRows = await Future.wait(
+          chunk.map((campaign) async {
+            final campaignId = int.tryParse(campaign.id);
+            if (campaignId == null) return null;
+            final rows = await _fetchInventoryStatsRows(
+              campaignId: campaignId,
+              query: query,
+              selectedOperatorIds: selectedOperatorIds,
+              selectedCityIds: [city.value],
+            );
+            if (rows == null || rows.isEmpty) return null;
+            return MapEntry(
+              campaign,
+              ServiceDashboardCampaignSummary.fromInventoryStats(campaign, rows),
+            );
+          }),
+        );
+
+        for (final row in chunkRows.whereType<MapEntry<Campaign, ServiceDashboardCampaignSummary>>()) {
+          final aggregate = aggregates.putIfAbsent(
+            city.value,
+            () => _CityAggregate(cityId: city.value, cityName: city.key),
+          );
+          aggregate.add(row.key, row.value);
+        }
+      }
+    }
+
+    final result = aggregates.values
+        .map((aggregate) => aggregate.build())
+        .toList()
+      ..sort((a, b) => b.spent.compareTo(a.spent));
+    return result;
+  }
+
   Future<ServiceDashboardCampaignSummary?> _fetchImpressionFactForCampaign(
     Campaign campaign,
     ServiceDashboardQuery query,
@@ -1029,6 +1102,37 @@ class _OperatorAggregate {
     return ServiceDashboardOperatorSummary(
       operatorId: operatorId,
       operatorName: operatorName,
+      spent: spent,
+      impressions: impressions,
+      ots: ots,
+      cpm: cpm,
+      campaignCount: campaignIds.length,
+    );
+  }
+}
+
+class _CityAggregate {
+  final int cityId;
+  final String cityName;
+  double spent = 0;
+  int impressions = 0;
+  int ots = 0;
+  final Set<String> campaignIds = {};
+
+  _CityAggregate({required this.cityId, required this.cityName});
+
+  void add(Campaign campaign, ServiceDashboardCampaignSummary summary) {
+    spent += summary.spent;
+    impressions += summary.impressions;
+    ots += summary.ots;
+    campaignIds.add(campaign.id);
+  }
+
+  ServiceDashboardCitySummary build() {
+    final cpm = impressions > 0 ? (spent / impressions) * 1000 : 0.0;
+    return ServiceDashboardCitySummary(
+      cityId: cityId,
+      cityName: cityName,
       spent: spent,
       impressions: impressions,
       ots: ots,
