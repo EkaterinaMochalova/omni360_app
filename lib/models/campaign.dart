@@ -40,6 +40,7 @@ class Campaign {
   final String? endDate;
   final String? type;
   final String? city;
+  final List<int> cityIds;
   final List<String> regionCodes;
   final List<int> displayOwnerIds;
   final List<String> displayOwners;
@@ -64,6 +65,7 @@ class Campaign {
     this.endDate,
     this.type,
     this.city,
+    this.cityIds = const [],
     this.regionCodes = const [],
     this.displayOwnerIds = const [],
     this.displayOwners = const [],
@@ -106,6 +108,7 @@ class Campaign {
       city:
           json['city']?.toString() ??
           (json['targetCity'] as Map?)?['name']?.toString(),
+      cityIds: _extractCityIds(json),
       regionCodes: _extractRegionCodes(json),
       displayOwnerIds: displayOwners.$1,
       displayOwners: displayOwners.$2,
@@ -152,6 +155,11 @@ class Campaign {
 
     for (final segment in json['segments'] as List? ?? const []) {
       final segmentMap = segment as Map?;
+      final segmentDisplayOwnerId = (segmentMap?['displayOwnerId'] as num?)
+          ?.toInt();
+      if (segmentDisplayOwnerId != null) {
+        ids.add(segmentDisplayOwnerId);
+      }
       addFrom(segmentMap?['displayOwner']);
       addFrom(segmentMap?['displayOwnerDTO']);
     }
@@ -184,6 +192,24 @@ class Campaign {
     }
 
     return formats.toList()..sort();
+  }
+
+  static List<int> _extractCityIds(Map<String, dynamic> json) {
+    final ids = <int>{};
+
+    for (final value in json['cities'] as List? ?? const []) {
+      final id = (value as num?)?.toInt();
+      if (id != null) {
+        ids.add(id);
+      }
+    }
+
+    final targetCityId = ((json['targetCity'] as Map?)?['id'] as num?)?.toInt();
+    if (targetCityId != null) {
+      ids.add(targetCityId);
+    }
+
+    return ids.toList()..sort();
   }
 
   static List<String> _extractRegionCodes(Map<String, dynamic> json) {
