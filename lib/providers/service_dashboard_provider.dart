@@ -61,6 +61,7 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
   final Ref _ref;
   final Omni360Client _client;
   final Map<String, Campaign> _campaignDetailCache = {};
+  final Map<String, Map<int, Map<String, dynamic>>> _campaignSegmentCache = {};
 
   Future<void> _load() async {
     await _loadCampaigns();
@@ -146,7 +147,7 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
     for (var i = 0; i < missingDetails.length; i += batchSize) {
       final chunk = missingDetails.skip(i).take(batchSize).toList();
       final chunkResults = await Future.wait(
-        chunk.map(_fetchCampaignDetailSafe),
+        chunk.map((campaign) => _fetchCampaignDetailSafe(campaign, query)),
       );
 
       for (final campaign in chunkResults.whereType<Campaign>()) {
@@ -186,10 +187,13 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
     return needsOperatorDetails || needsCityDetails;
   }
 
-  Future<Campaign?> _fetchCampaignDetailSafe(Campaign campaign) async {
+  Future<Campaign?> _fetchCampaignDetailSafe(
+    Campaign campaign,
+    ServiceDashboardQuery query,
+  ) async {
     final cached = _campaignDetailCache[campaign.id];
     if (cached != null && _hasUsefulCampaignDetails(cached)) {
-      return cached;
+      return _applyFilterBudgetFromSegments(cached, query);
     }
 
     try {
@@ -201,7 +205,11 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
         final detailedCampaign = Campaign.fromJson(
           response.data as Map<String, dynamic>,
         );
-        return await _enrichCampaignFromSegments(detailedCampaign);
+        final enrichedCampaign = await _enrichCampaignFromSegments(
+          detailedCampaign,
+        );
+        _campaignDetailCache[campaign.id] = enrichedCampaign;
+        return _applyFilterBudgetFromSegments(enrichedCampaign, query);
       }
     } catch (_) {
       return cached ?? campaign;
@@ -230,6 +238,7 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
     final enrichedRegions = {...campaign.regionCodes};
     final enrichedOperatorIds = {...campaign.displayOwnerIds};
     final enrichedOperators = {...campaign.displayOwners};
+    final segmentCache = <int, Map<String, dynamic>>{};
 
     for (final segmentId in campaign.segmentIds) {
       try {
@@ -240,22 +249,7 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
 
         final data = response.data;
         if (data is! Map<String, dynamic>) continue;
-
-        final city = data['city'] as Map?;
-        final cityId = (city?['id'] as num?)?.toInt();
-        final cityName = city?['name']?.toString();
-        if (cityId != null) {
-          enrichedCityIds.add(cityId);
-        }
-        if (cityName != null && cityName.isNotEmpty) {
-          enrichedCities.add(cityName);
-        }
-
-        final region = data['region'] as Map?;
-        final regionName = region?['name']?.toString();
-        if (regionName != null && regionName.isNotEmpty) {
-          enrichedRegions.add(regionName.toUpperCase());
-        }
+        segmentCache[segmentId] = data;
 
         final displayOwnerId =
             (data['displayOwnerId'] as num?)?.toInt() ??
@@ -268,9 +262,37 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
         if (displayOwnerName != null && displayOwnerName.isNotEmpty) {
           enrichedOperators.add(displayOwnerName);
         }
+
+        void addLocationFrom(dynamic item) {
+          final mapItem = item as Map?;
+          final city = mapItem?['city'] as Map?;
+          final cityId = (city?['id'] as num?)?.toInt();
+          final cityName = city?['name']?.toString();
+          if (cityId != null) {
+            enrichedCityIds.add(cityId);
+          }
+          if (cityName != null && cityName.isNotEmpty) {
+            enrichedCities.add(cityName);
+          }
+
+          final region = mapItem?['region'] as Map?;
+          final regionName = region?['name']?.toString();
+          if (regionName != null && regionName.isNotEmpty) {
+            enrichedRegions.add(regionName.toUpperCase());
+          }
+        }
+
+        addLocationFrom(data);
+        for (final inventory in data['inventories'] as List? ?? const []) {
+          addLocationFrom(inventory);
+        }
       } catch (_) {
         continue;
       }
+    }
+
+    if (segmentCache.isNotEmpty) {
+      _campaignSegmentCache[campaign.id] = segmentCache;
     }
 
     return campaign.copyWith(
@@ -280,6 +302,104 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
       displayOwnerIds: enrichedOperatorIds.toList()..sort(),
       displayOwners: enrichedOperators.toList()..sort(),
     );
+  }
+
+  Campaign _applyFilterBudgetFromSegments(
+    Campaign campaign,
+    ServiceDashboardQuery query,
+  ) {
+    if (query.operators.isEmpty && query.cities.isEmpty) {
+      return campaign;
+    }
+
+    final segmentCache = _campaignSegmentCache[campaign.id];
+    if (segmentCache == null || segmentCache.isEmpty) {
+      return campaign;
+    }
+
+    final selectedOperatorIds = query.operators
+        .map((name) => state.filters.operatorIds[name])
+        .whereType<int>()
+        .toSet();
+    final selectedCityIds = query.cities
+        .map((name) => state.filters.cityIds[name])
+        .whereType<int>()
+        .toSet();
+
+    double matchedBudget = 0;
+    var hasMatchedSegment = false;
+
+    for (final data in segmentCache.values) {
+      final segmentOperatorId =
+          (data['displayOwnerId'] as num?)?.toInt() ??
+          ((data['displayOwner'] as Map?)?['id'] as num?)?.toInt();
+      final segmentOperatorName =
+          (data['displayOwner'] as Map?)?['name']?.toString();
+
+      final matchesOperator =
+          query.operators.isEmpty ||
+          (segmentOperatorId != null &&
+              selectedOperatorIds.contains(segmentOperatorId)) ||
+          (segmentOperatorName != null &&
+              query.operators.contains(segmentOperatorName));
+
+      if (!matchesOperator) {
+        continue;
+      }
+
+      final inventories = (data['inventories'] as List? ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .toList();
+
+      bool inventoryMatchesCity(Map<String, dynamic> inventory) {
+        if (query.cities.isEmpty) return true;
+
+        final city = inventory['city'] as Map?;
+        final cityId = (city?['id'] as num?)?.toInt();
+        final cityName = city?['name']?.toString();
+        final region = inventory['region'] as Map?;
+        final regionName = region?['name']?.toString();
+
+        if (cityId != null && selectedCityIds.contains(cityId)) {
+          return true;
+        }
+        if (cityName != null && query.cities.contains(cityName)) {
+          return true;
+        }
+        if (regionName != null &&
+            _regionCodesForCity(regionName).any(campaign.regionCodes.contains)) {
+          return true;
+        }
+        return false;
+      }
+
+      final matchingInventories = inventories.where(inventoryMatchesCity).toList();
+      final matchesCity = query.cities.isEmpty || matchingInventories.isNotEmpty;
+      if (!matchesCity) {
+        continue;
+      }
+
+      hasMatchedSegment = true;
+      if (matchingInventories.isNotEmpty) {
+        matchedBudget += matchingInventories.fold<double>(
+          0,
+          (sum, inventory) => sum + _toDouble(inventory['budget']),
+        );
+      } else {
+        matchedBudget += _toDouble(data['budget']);
+      }
+    }
+
+    if (!hasMatchedSegment) {
+      return campaign;
+    }
+
+    return campaign.copyWith(budget: matchedBudget);
+  }
+
+  double _toDouble(dynamic value) {
+    if (value is num) return value.toDouble();
+    return double.tryParse(value?.toString() ?? '') ?? 0;
   }
 
   Future<List<ServiceDashboardCampaignSummary>> _fetchCampaignStats(

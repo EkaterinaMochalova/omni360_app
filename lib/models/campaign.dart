@@ -283,6 +283,7 @@ class Campaign {
   }
 
   Campaign copyWith({
+    double? budget,
     String? city,
     List<int>? cityIds,
     List<String>? regionCodes,
@@ -299,7 +300,7 @@ class Campaign {
       customerName: customerName,
       brandId: brandId,
       brandName: brandName,
-      budget: budget,
+      budget: budget ?? this.budget,
       dailyBudget: dailyBudget,
       spent: spent,
       ots: ots,
