@@ -107,8 +107,9 @@ class ServiceDashboardCampaignSummary {
           sum +
           _toDouble(
             row['customerStats'] is Map<String, dynamic>
-                ? (row['customerStats'] as Map<String, dynamic>)['budgetShowed']
-                : row['totalShowedBudget'],
+                ? ((row['customerStats'] as Map<String, dynamic>)['dailyBudgetShowed'] ??
+                      (row['customerStats'] as Map<String, dynamic>)['budgetShowed'])
+                : (row['dailyShowedBudget'] ?? row['totalShowedBudget']),
           ),
     );
     final impressions = rows.fold<int>(
@@ -125,7 +126,14 @@ class ServiceDashboardCampaignSummary {
     );
     final weightedSpendForCpm = rows.fold<double>(
       0,
-      (sum, row) => sum + _toDouble(row['totalShowedBudget']),
+      (sum, row) =>
+          sum +
+          _toDouble(
+            row['customerStats'] is Map<String, dynamic>
+                ? ((row['customerStats'] as Map<String, dynamic>)['dailyBudgetShowed'] ??
+                      (row['customerStats'] as Map<String, dynamic>)['budgetShowed'])
+                : (row['dailyShowedBudget'] ?? row['totalShowedBudget']),
+          ),
     );
     final showPrice = impressions > 0 ? spent / impressions : 0.0;
     final cpm = impressions > 0 ? (weightedSpendForCpm / impressions) * 1000 : 0.0;
