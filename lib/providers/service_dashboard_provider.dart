@@ -60,6 +60,7 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
 
   final Ref _ref;
   final Omni360Client _client;
+  final Map<String, Campaign> _campaignDetailCache = {};
 
   Future<void> _load() async {
     await _loadCampaigns();
@@ -71,6 +72,9 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
       final campaigns =
           await _ref.read(campaignsProvider.notifier).fetch(silent: true) ??
           const <Campaign>[];
+      for (final campaign in campaigns) {
+        _campaignDetailCache[campaign.id] = campaign;
+      }
       final extraFilters = await _loadReferenceFilters();
       state = state.copyWith(
         campaigns: AsyncValue.data(campaigns),
@@ -82,11 +86,18 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
   }
 
   Future<void> refresh() async {
-    final campaigns = state.campaigns.asData?.value;
+    var campaigns = state.campaigns.asData?.value;
     if (campaigns == null) return;
 
     state = state.copyWith(summaries: const AsyncValue.loading());
     try {
+      if (state.query.operators.isNotEmpty) {
+        campaigns = await _enrichCampaignsForOperatorFiltering(
+          campaigns,
+          state.query,
+        );
+      }
+
       final filteredCampaigns = filterCampaigns(campaigns, state.query);
       if (filteredCampaigns.isEmpty) {
         state = state.copyWith(summaries: const AsyncValue.data([]));
@@ -103,6 +114,74 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
     } catch (e, st) {
       state = state.copyWith(summaries: AsyncValue.error(e, st));
     }
+  }
+
+  Future<List<Campaign>> _enrichCampaignsForOperatorFiltering(
+    List<Campaign> campaigns,
+    ServiceDashboardQuery query,
+  ) async {
+    final baseQuery = query.copyWith(operators: const {});
+    final candidates = filterCampaigns(campaigns, baseQuery);
+    final missingOperatorDetails = candidates
+        .where(
+          (campaign) =>
+              campaign.displayOwners.isEmpty && campaign.displayOwnerIds.isEmpty,
+        )
+        .toList();
+
+    if (missingOperatorDetails.isEmpty) {
+      return campaigns;
+    }
+
+    final enrichedById = <String, Campaign>{};
+    const batchSize = 8;
+
+    for (var i = 0; i < missingOperatorDetails.length; i += batchSize) {
+      final chunk = missingOperatorDetails.skip(i).take(batchSize).toList();
+      final chunkResults = await Future.wait(
+        chunk.map(_fetchCampaignDetailSafe),
+      );
+
+      for (final campaign in chunkResults.whereType<Campaign>()) {
+        enrichedById[campaign.id] = campaign;
+        _campaignDetailCache[campaign.id] = campaign;
+      }
+    }
+
+    if (enrichedById.isEmpty) {
+      return campaigns;
+    }
+
+    final merged = campaigns
+        .map((campaign) => enrichedById[campaign.id] ?? campaign)
+        .toList();
+    state = state.copyWith(
+      campaigns: AsyncValue.data(merged),
+      filters: _buildFilters(merged, extraFilters: state.filters),
+    );
+    return merged;
+  }
+
+  Future<Campaign?> _fetchCampaignDetailSafe(Campaign campaign) async {
+    final cached = _campaignDetailCache[campaign.id];
+    if (cached != null &&
+        (cached.displayOwners.isNotEmpty || cached.displayOwnerIds.isNotEmpty)) {
+      return cached;
+    }
+
+    try {
+      final response = await _client.dio.get(
+        '/api/v1.0/clients/campaigns/${campaign.id}',
+        queryParameters: {'withPlatformFee': false},
+      );
+      if (response.data is Map<String, dynamic>) {
+        return Campaign.fromJson(response.data as Map<String, dynamic>);
+      }
+    } catch (_) {
+      return cached ?? campaign;
+    }
+
+    return cached ?? campaign;
   }
 
   Future<List<ServiceDashboardCampaignSummary>> _fetchCampaignStats(
