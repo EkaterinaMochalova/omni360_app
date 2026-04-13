@@ -235,9 +235,7 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
       final matchesOperator =
           query.operators.isEmpty ||
           campaign.displayOwners.any(query.operators.contains);
-      final matchesCity =
-          query.cities.isEmpty ||
-          (campaign.city != null && query.cities.contains(campaign.city));
+      final matchesCity = _matchesSelectedCities(campaign, query.cities);
       final matchesFormat =
           query.formats.isEmpty || campaign.formats.any(query.formats.contains);
 
@@ -248,6 +246,28 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
           matchesCity &&
           matchesFormat;
     }).toList();
+  }
+
+  static bool _matchesSelectedCities(Campaign campaign, Set<String> cities) {
+    if (cities.isEmpty) return true;
+
+    final normalizedCampaignCity = _normalizeCityName(campaign.city);
+    final campaignRegionCodes = campaign.regionCodes.toSet();
+
+    for (final city in cities) {
+      final normalizedSelectedCity = _normalizeCityName(city);
+      if (normalizedCampaignCity != null &&
+          normalizedCampaignCity == normalizedSelectedCity) {
+        return true;
+      }
+
+      final candidateCodes = _regionCodesForCity(city);
+      if (candidateCodes.any(campaignRegionCodes.contains)) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   Future<ServiceDashboardFiltersData> _loadReferenceFilters() async {
@@ -377,6 +397,37 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
     String pad(int n) => n.toString().padLeft(2, '0');
     return '${value.year}-${pad(value.month)}-${pad(value.day)} '
         '${pad(value.hour)}:${pad(value.minute)}:${pad(value.second)}';
+  }
+
+  static String? _normalizeCityName(String? value) {
+    if (value == null) return null;
+    final normalized = value.trim().toLowerCase();
+    return normalized.isEmpty ? null : normalized;
+  }
+
+  static Set<String> _regionCodesForCity(String city) {
+    final normalized = city.trim().toLowerCase();
+    if (normalized.isEmpty) return const {};
+
+    if (normalized.contains('санкт') ||
+        normalized.contains('петербург') ||
+        normalized.contains('спб')) {
+      return const {'SPB'};
+    }
+
+    if (normalized.contains('моск') && normalized.contains('обл')) {
+      return const {'MOS'};
+    }
+
+    if (normalized.contains('моск')) {
+      return const {'MSC'};
+    }
+
+    if (normalized.contains('друг') || normalized.contains('проч')) {
+      return const {'OTHER'};
+    }
+
+    return const {};
   }
 }
 
