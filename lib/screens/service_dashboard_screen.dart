@@ -18,6 +18,7 @@ class ServiceDashboardScreen extends ConsumerWidget {
     final filteredCampaigns = ServiceDashboardController.filterCampaigns(
       campaigns,
       state.query,
+      filters: state.filters,
     );
 
     return Scaffold(
