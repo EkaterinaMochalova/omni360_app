@@ -454,20 +454,20 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
       final rows = <Map<String, dynamic>>[];
       final queryVariants = [
         <String, dynamic>{
-          'startDate': _formatSpaceDateTime(query.start.toUtc()),
-          'endDate': _formatSpaceDateTime(query.end.toUtc()),
+          'startDate': _formatIsoLocalDateTime(query.start.toUtc()),
+          'endDate': _formatIsoLocalDateTime(query.end.toUtc()),
           if (selectedOperatorIds.isNotEmpty) 'displayOwnerIds': selectedOperatorIds,
           if (selectedCityIds.isNotEmpty) 'cities': selectedCityIds,
         },
         <String, dynamic>{
-          'localStartDate': _formatSpaceDateTime(query.start),
-          'localEndDate': _formatSpaceDateTime(query.end),
+          'localStartDate': _formatIsoLocalDateTime(query.start),
+          'localEndDate': _formatIsoLocalDateTime(query.end),
           if (selectedOperatorIds.isNotEmpty) 'displayOwnerIds': selectedOperatorIds,
           if (selectedCityIds.isNotEmpty) 'cities': selectedCityIds,
         },
         <String, dynamic>{
-          'startDate': _formatSpaceDateTime(query.start.toUtc()),
-          'endDate': _formatSpaceDateTime(query.end.toUtc()),
+          'startDate': _formatIsoLocalDateTime(query.start.toUtc()),
+          'endDate': _formatIsoLocalDateTime(query.end.toUtc()),
         },
       ];
 
@@ -756,10 +756,10 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
     );
   }
 
-  static String _formatSpaceDateTime(DateTime value) {
+  static String _formatIsoLocalDateTime(DateTime value) {
     String pad(int n) => n.toString().padLeft(2, '0');
-    return '${value.year}-${pad(value.month)}-${pad(value.day)} '
-        '${pad(value.hour)}:${pad(value.minute)}:${pad(value.second)}';
+    return '${value.year}-${pad(value.month)}-${pad(value.day)}'
+        'T${pad(value.hour)}:${pad(value.minute)}:${pad(value.second)}';
   }
 
   static String? _normalizeCityName(String? value) {
