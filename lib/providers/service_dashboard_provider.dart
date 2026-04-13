@@ -159,21 +159,12 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
     ServiceDashboardQuery query,
     ServiceDashboardFiltersData filters,
   ) async {
-    final selectedCityIds = query.cities
-        .map((name) => filters.cityIds[name])
-        .whereType<int>()
-        .toList();
-    final selectedOperatorIds = query.operators
-        .map((name) => filters.operatorIds[name])
-        .whereType<int>()
-        .toList();
-
     final reqList = <String, dynamic>{
       'campaignIds': campaignIds,
       'startDate': _formatSpaceDateTime(query.start.toUtc()),
       'endDate': _formatSpaceDateTime(query.end.toUtc()),
-      'cities': selectedCityIds,
-      'displayOwnerIds': selectedOperatorIds,
+      'cities': const <int>[],
+      'displayOwnerIds': const <int>[],
       'creatives': const <int>[],
       'creativeContents': const <int>[],
       'states': const <String>[],
@@ -243,12 +234,10 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
               query.advertisers.contains(campaign.customerName));
       final matchesOperator =
           query.operators.isEmpty ||
-          campaign.displayOwners.isEmpty ||
           campaign.displayOwners.any(query.operators.contains);
       final matchesCity =
           query.cities.isEmpty ||
-          campaign.city == null ||
-          query.cities.contains(campaign.city);
+          (campaign.city != null && query.cities.contains(campaign.city));
       final matchesFormat =
           query.formats.isEmpty || campaign.formats.any(query.formats.contains);
 
