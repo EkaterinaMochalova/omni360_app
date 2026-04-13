@@ -412,26 +412,28 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
 
     for (var i = 0; i < campaigns.length; i += chunkSize) {
       final chunk = campaigns.skip(i).take(chunkSize).toList();
-      chunkFutures.add(_fetchInventoryFactChunk(chunk, query, filters));
+      chunkFutures.add(_fetchImpressionFactChunk(chunk, query, filters));
     }
 
     final chunkResults = await Future.wait(chunkFutures);
     return chunkResults.expand((items) => items).toList();
   }
 
-  Future<List<ServiceDashboardCampaignSummary>> _fetchInventoryFactChunk(
+  Future<List<ServiceDashboardCampaignSummary>> _fetchImpressionFactChunk(
     List<Campaign> campaigns,
     ServiceDashboardQuery query,
     ServiceDashboardFiltersData filters,
   ) async {
     final summaries = await Future.wait(
-      campaigns.map((campaign) => _fetchInventoryFactForCampaign(campaign, query, filters)),
+      campaigns.map(
+        (campaign) => _fetchImpressionFactForCampaign(campaign, query, filters),
+      ),
     );
 
     return summaries.whereType<ServiceDashboardCampaignSummary>().toList();
   }
 
-  Future<ServiceDashboardCampaignSummary?> _fetchInventoryFactForCampaign(
+  Future<ServiceDashboardCampaignSummary?> _fetchImpressionFactForCampaign(
     Campaign campaign,
     ServiceDashboardQuery query,
     ServiceDashboardFiltersData filters,
@@ -449,29 +451,43 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
         .toList();
 
     try {
-      final response = await _client.dio.get(
-        '/api/v1.0/clients/campaigns/$campaignId/impression-inventory-stats',
-        queryParameters: {
-          'page': 0,
-          'size': 1000,
-          'localStartDate': _formatSpaceDateTime(query.start),
-          'localEndDate': _formatSpaceDateTime(query.end),
-          'displayOwnerIds': selectedOperatorIds,
-          'cities': selectedCityIds,
-          'withPlatformFee': false,
-        },
-        options: Options(listFormat: ListFormat.multi),
-      );
+      final rows = <Map<String, dynamic>>[];
+      var page = 0;
+      var totalPages = 1;
 
-      final rows = (response.data as List? ?? const [])
-          .whereType<Map<String, dynamic>>()
-          .toList();
+      do {
+        final response = await _client.dio.get(
+          '/api/v1.0/clients/campaigns/$campaignId/impressions',
+          queryParameters: {
+            'page': page,
+            'size': 1000,
+            'localStartDate': _formatSpaceDateTime(query.start),
+            'localEndDate': _formatSpaceDateTime(query.end),
+            'displayOwnerIds': selectedOperatorIds,
+            'cities': selectedCityIds,
+            'withPlatformFee': false,
+          },
+          options: Options(listFormat: ListFormat.multi),
+        );
+
+        final data = response.data;
+        if (data is Map<String, dynamic>) {
+          rows.addAll(
+            (data['content'] as List? ?? const [])
+                .whereType<Map<String, dynamic>>(),
+          );
+          totalPages = (data['totalPages'] as num?)?.toInt() ?? 1;
+        } else {
+          totalPages = 1;
+        }
+        page++;
+      } while (page < totalPages);
 
       if (rows.isEmpty) {
         return ServiceDashboardCampaignSummary.fromCampaign(campaign);
       }
 
-      return ServiceDashboardCampaignSummary.fromInventoryStats(campaign, rows);
+      return ServiceDashboardCampaignSummary.fromImpressions(campaign, rows);
     } on DioException {
       return ServiceDashboardCampaignSummary.fromCampaign(campaign);
     }
