@@ -11,12 +11,14 @@ import 'campaigns_provider.dart';
 class ServiceDashboardState {
   final AsyncValue<List<Campaign>> campaigns;
   final AsyncValue<List<ServiceDashboardCampaignSummary>> summaries;
+  final AsyncValue<List<ServiceDashboardOperatorSummary>> operatorSummaries;
   final ServiceDashboardQuery query;
   final ServiceDashboardFiltersData filters;
 
   const ServiceDashboardState({
     required this.campaigns,
     required this.summaries,
+    required this.operatorSummaries,
     required this.query,
     required this.filters,
   });
@@ -24,6 +26,7 @@ class ServiceDashboardState {
   factory ServiceDashboardState.initial() => ServiceDashboardState(
     campaigns: const AsyncValue.loading(),
     summaries: const AsyncValue.loading(),
+    operatorSummaries: const AsyncValue.data([]),
     query: ServiceDashboardQuery.initial(),
     filters: const ServiceDashboardFiltersData(
       brands: [],
@@ -39,12 +42,14 @@ class ServiceDashboardState {
   ServiceDashboardState copyWith({
     AsyncValue<List<Campaign>>? campaigns,
     AsyncValue<List<ServiceDashboardCampaignSummary>>? summaries,
+    AsyncValue<List<ServiceDashboardOperatorSummary>>? operatorSummaries,
     ServiceDashboardQuery? query,
     ServiceDashboardFiltersData? filters,
   }) {
     return ServiceDashboardState(
       campaigns: campaigns ?? this.campaigns,
       summaries: summaries ?? this.summaries,
+      operatorSummaries: operatorSummaries ?? this.operatorSummaries,
       query: query ?? this.query,
       filters: filters ?? this.filters,
     );
@@ -90,7 +95,10 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
     var campaigns = state.campaigns.asData?.value;
     if (campaigns == null) return;
 
-    state = state.copyWith(summaries: const AsyncValue.loading());
+    state = state.copyWith(
+      summaries: const AsyncValue.loading(),
+      operatorSummaries: const AsyncValue.loading(),
+    );
     try {
       if (state.query.operators.isNotEmpty || state.query.cities.isNotEmpty) {
         campaigns = await _enrichCampaignsForFilterDetails(
@@ -114,10 +122,23 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
         state.query,
         state.filters,
       );
+      final operatorSummaries = state.query.operators.isNotEmpty
+          ? await _fetchOperatorSummaries(
+              filteredCampaigns,
+              state.query,
+              state.filters,
+            )
+          : const <ServiceDashboardOperatorSummary>[];
 
-      state = state.copyWith(summaries: AsyncValue.data(summaries));
+      state = state.copyWith(
+        summaries: AsyncValue.data(summaries),
+        operatorSummaries: AsyncValue.data(operatorSummaries),
+      );
     } catch (e, st) {
-      state = state.copyWith(summaries: AsyncValue.error(e, st));
+      state = state.copyWith(
+        summaries: AsyncValue.error(e, st),
+        operatorSummaries: AsyncValue.error(e, st),
+      );
     }
   }
 
@@ -555,6 +576,26 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
         .whereType<int>()
         .toList();
 
+    final rows = await _fetchInventoryStatsRows(
+      campaignId: campaignId,
+      query: query,
+      selectedOperatorIds: selectedOperatorIds,
+      selectedCityIds: selectedCityIds,
+    );
+
+    if (rows == null || rows.isEmpty) {
+      return _fetchImpressionFactForCampaign(campaign, query, filters);
+    }
+
+    return ServiceDashboardCampaignSummary.fromInventoryStats(campaign, rows);
+  }
+
+  Future<List<Map<String, dynamic>>?> _fetchInventoryStatsRows({
+    required int campaignId,
+    required ServiceDashboardQuery query,
+    required List<int> selectedOperatorIds,
+    required List<int> selectedCityIds,
+  }) async {
     final variants = <Map<String, dynamic>>[
       {
         'page': 0,
@@ -590,10 +631,7 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
         if (data is List) {
           final rows = data.whereType<Map<String, dynamic>>().toList();
           if (rows.isNotEmpty) {
-            return ServiceDashboardCampaignSummary.fromInventoryStats(
-              campaign,
-              rows,
-            );
+            return rows;
           }
         }
       } on DioException catch (e) {
@@ -607,7 +645,65 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
         '[service-dashboard inventory-stats] campaign=$campaignId status=${lastError.response?.statusCode} data=${lastError.response?.data}',
       );
     }
-    return _fetchImpressionFactForCampaign(campaign, query, filters);
+    return null;
+  }
+
+  Future<List<ServiceDashboardOperatorSummary>> _fetchOperatorSummaries(
+    List<Campaign> campaigns,
+    ServiceDashboardQuery query,
+    ServiceDashboardFiltersData filters,
+  ) async {
+    final selectedOperators = query.operators
+        .map((name) => MapEntry(name, filters.operatorIds[name]))
+        .where((entry) => entry.value != null)
+        .map((entry) => MapEntry(entry.key, entry.value!))
+        .toList();
+    final selectedCityIds = query.cities
+        .map((name) => filters.cityIds[name])
+        .whereType<int>()
+        .toList();
+
+    if (selectedOperators.isEmpty) return const [];
+
+    final aggregates = <int, _OperatorAggregate>{};
+    const batchSize = 8;
+
+    for (final operator in selectedOperators) {
+      for (var i = 0; i < campaigns.length; i += batchSize) {
+        final chunk = campaigns.skip(i).take(batchSize).toList();
+        final chunkRows = await Future.wait(
+          chunk.map((campaign) async {
+            final campaignId = int.tryParse(campaign.id);
+            if (campaignId == null) return null;
+            final rows = await _fetchInventoryStatsRows(
+              campaignId: campaignId,
+              query: query,
+              selectedOperatorIds: [operator.value],
+              selectedCityIds: selectedCityIds,
+            );
+            if (rows == null || rows.isEmpty) return null;
+            return MapEntry(
+              campaign,
+              ServiceDashboardCampaignSummary.fromInventoryStats(campaign, rows),
+            );
+          }),
+        );
+
+        for (final row in chunkRows.whereType<MapEntry<Campaign, ServiceDashboardCampaignSummary>>()) {
+          final aggregate = aggregates.putIfAbsent(
+            operator.value,
+            () => _OperatorAggregate(operatorId: operator.value, operatorName: operator.key),
+          );
+          aggregate.add(row.key, row.value);
+        }
+      }
+    }
+
+    final result = aggregates.values
+        .map((aggregate) => aggregate.build())
+        .toList()
+      ..sort((a, b) => b.spent.compareTo(a.spent));
+    return result;
   }
 
   Future<ServiceDashboardCampaignSummary?> _fetchImpressionFactForCampaign(
@@ -908,6 +1004,37 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
     }
 
     return const {};
+  }
+}
+
+class _OperatorAggregate {
+  final int operatorId;
+  final String operatorName;
+  double spent = 0;
+  int impressions = 0;
+  int ots = 0;
+  final Set<String> campaignIds = {};
+
+  _OperatorAggregate({required this.operatorId, required this.operatorName});
+
+  void add(Campaign campaign, ServiceDashboardCampaignSummary summary) {
+    spent += summary.spent;
+    impressions += summary.impressions;
+    ots += summary.ots;
+    campaignIds.add(campaign.id);
+  }
+
+  ServiceDashboardOperatorSummary build() {
+    final cpm = impressions > 0 ? (spent / impressions) * 1000 : 0.0;
+    return ServiceDashboardOperatorSummary(
+      operatorId: operatorId,
+      operatorName: operatorName,
+      spent: spent,
+      impressions: impressions,
+      ots: ots,
+      cpm: cpm,
+      campaignCount: campaignIds.length,
+    );
   }
 }
 
