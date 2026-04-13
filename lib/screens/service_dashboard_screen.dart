@@ -78,6 +78,8 @@ class ServiceDashboardScreen extends ConsumerWidget {
                 final totals = _buildTotals(filteredCampaigns, summaries);
                 final operatorSummaries =
                     state.operatorSummaries.asData?.value ?? const <ServiceDashboardOperatorSummary>[];
+                final citySummaries =
+                    state.citySummaries.asData?.value ?? const <ServiceDashboardCitySummary>[];
                 final sorted = [...summaries]
                   ..sort((a, b) => b.spent.compareTo(a.spent));
 
@@ -177,6 +179,23 @@ class ServiceDashboardScreen extends ConsumerWidget {
                             : Column(
                                 children: operatorSummaries.map((summary) {
                                   return _OperatorSummaryRow(summary: summary);
+                                }).toList(),
+                              ),
+                      ),
+                    ],
+                    if (state.query.cities.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      _SectionCard(
+                        title: 'По городам',
+                        subtitle: 'Факт по выбранным городам за период',
+                        child: citySummaries.isEmpty
+                            ? const Text(
+                                'Нет данных по выбранным городам.',
+                                style: TextStyle(color: kTextSecondary),
+                              )
+                            : Column(
+                                children: citySummaries.map((summary) {
+                                  return _CitySummaryRow(summary: summary);
                                 }).toList(),
                               ),
                       ),
@@ -681,6 +700,72 @@ class _OperatorSummaryRow extends StatelessWidget {
               Expanded(
                 child: Text(
                   summary.operatorName,
+                  style: const TextStyle(
+                    color: kTextPrimary,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              Text(
+                ServiceDashboardScreen._money(summary.spent),
+                style: const TextStyle(
+                  color: kTextPrimary,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 14,
+            runSpacing: 8,
+            children: [
+              _MiniStat(
+                label: 'Кампаний',
+                value: ServiceDashboardScreen._int(summary.campaignCount),
+              ),
+              _MiniStat(
+                label: 'Показы',
+                value: ServiceDashboardScreen._int(summary.impressions),
+              ),
+              _MiniStat(
+                label: 'OTS',
+                value: ServiceDashboardScreen._int(summary.ots),
+              ),
+              _MiniStat(
+                label: 'CPM',
+                value: ServiceDashboardScreen._money(summary.cpm),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CitySummaryRow extends StatelessWidget {
+  final ServiceDashboardCitySummary summary;
+
+  const _CitySummaryRow({required this.summary});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: kBg,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  summary.cityName,
                   style: const TextStyle(
                     color: kTextPrimary,
                     fontWeight: FontWeight.w700,

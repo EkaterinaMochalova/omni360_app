@@ -293,6 +293,26 @@ class ServiceDashboardOperatorSummary {
   });
 }
 
+class ServiceDashboardCitySummary {
+  final int cityId;
+  final String cityName;
+  final double spent;
+  final int impressions;
+  final int ots;
+  final double cpm;
+  final int campaignCount;
+
+  const ServiceDashboardCitySummary({
+    required this.cityId,
+    required this.cityName,
+    required this.spent,
+    required this.impressions,
+    required this.ots,
+    required this.cpm,
+    required this.campaignCount,
+  });
+}
+
 class ServiceDashboardFiltersData {
   final List<String> brands;
   final List<String> advertisers;
