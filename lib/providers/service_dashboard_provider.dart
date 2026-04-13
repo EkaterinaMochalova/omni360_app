@@ -449,7 +449,7 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
     ServiceDashboardFiltersData filters,
   ) async {
     if (query.operators.isNotEmpty || query.cities.isNotEmpty) {
-      return _fetchFilteredInventoryFactChunk(campaigns, query, filters);
+      return _fetchFilteredCampaignStatsChunk(campaigns, query, filters);
     }
 
     const chunkSize = 50;
@@ -462,6 +462,96 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
 
     final chunkResults = await Future.wait(chunkFutures);
     return chunkResults.expand((items) => items).toList();
+  }
+
+  Future<List<ServiceDashboardCampaignSummary>> _fetchFilteredCampaignStatsChunk(
+    List<Campaign> campaigns,
+    ServiceDashboardQuery query,
+    ServiceDashboardFiltersData filters,
+  ) async {
+    const chunkSize = 50;
+    final futures = <Future<List<ServiceDashboardCampaignSummary>>>[];
+
+    for (var i = 0; i < campaigns.length; i += chunkSize) {
+      final chunk = campaigns.skip(i).take(chunkSize).toList();
+      futures.add(_fetchCampaignsStatsSlice(chunk, query, filters));
+    }
+
+    final results = await Future.wait(futures);
+    return results.expand((items) => items).toList();
+  }
+
+  Future<List<ServiceDashboardCampaignSummary>> _fetchCampaignsStatsSlice(
+    List<Campaign> campaigns,
+    ServiceDashboardQuery query,
+    ServiceDashboardFiltersData filters,
+  ) async {
+    final campaignIds = campaigns
+        .map((campaign) => int.tryParse(campaign.id))
+        .whereType<int>()
+        .toList();
+    if (campaignIds.isEmpty) return const [];
+
+    final selectedOperatorIds = query.operators
+        .map((name) => filters.operatorIds[name])
+        .whereType<int>()
+        .toList();
+    final selectedCityIds = query.cities
+        .map((name) => filters.cityIds[name])
+        .whereType<int>()
+        .toList();
+
+    final reqList = <String, dynamic>{
+      'campaignIds': campaignIds,
+      'startDate': _formatApiDateTime(query.start),
+      'endDate': _formatApiDateTime(query.end),
+      'displayOwnerIds': selectedOperatorIds,
+      'cities': selectedCityIds,
+      'formats': query.formats.toList(),
+      'states': const <String>[],
+      'creatives': const <int>[],
+      'creativeContents': const <int>[],
+      'customerIds': const <int>[],
+      'priceMode': 'CUSTOMER_CHARGE_INCLUDED',
+      'withPlatformFee': false,
+      'groupMode': 'SUMMARY',
+      'page': 0,
+      'size': campaigns.length,
+    };
+
+    try {
+      final response = await _client.dio.get(
+        '/api/v1.0/clients/impressions/campaigns-stats',
+        queryParameters: {'reqList': jsonEncode(reqList)},
+      );
+      final data = response.data;
+      if (data is List) {
+        final byId = <int, Map<String, dynamic>>{};
+        for (final item in data.whereType<Map<String, dynamic>>()) {
+          final campaignMap = item['campaign'] as Map<String, dynamic>?;
+          final id = (campaignMap?['id'] as num?)?.toInt();
+          if (id != null) byId[id] = item;
+        }
+
+        if (byId.isNotEmpty) {
+          return campaigns.map((campaign) {
+            final id = int.tryParse(campaign.id);
+            final item = id == null ? null : byId[id];
+            if (item == null) {
+              return ServiceDashboardCampaignSummary.fromCampaign(campaign);
+            }
+            return ServiceDashboardCampaignSummary.fromJson(item);
+          }).toList();
+        }
+      }
+    } on DioException catch (e) {
+      // ignore: avoid_print
+      print(
+        '[service-dashboard campaigns-stats] status=${e.response?.statusCode} data=${e.response?.data}',
+      );
+    }
+
+    return _fetchFilteredInventoryFactChunk(campaigns, query, filters);
   }
 
   Future<List<ServiceDashboardCampaignSummary>> _fetchFilteredInventoryFactChunk(
