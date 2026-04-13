@@ -67,12 +67,14 @@ class CampaignAnalyticsQuery {
 
 class CampaignAnalyticsState {
   final AsyncValue<CampaignImpressionsPage> impressions;
+  final AsyncValue<CampaignAnalyticsAggregate> aggregate;
   final AsyncValue<CampaignAnalyticsFiltersData> filters;
   final CampaignAnalyticsDashboardPrefs prefs;
   final CampaignAnalyticsQuery query;
 
   const CampaignAnalyticsState({
     required this.impressions,
+    required this.aggregate,
     required this.filters,
     required this.prefs,
     required this.query,
@@ -80,6 +82,7 @@ class CampaignAnalyticsState {
 
   factory CampaignAnalyticsState.initial() => CampaignAnalyticsState(
     impressions: const AsyncValue.loading(),
+    aggregate: const AsyncValue.loading(),
     filters: const AsyncValue.loading(),
     prefs: const CampaignAnalyticsDashboardPrefs.defaults(),
     query: CampaignAnalyticsQuery.initial(),
@@ -87,12 +90,14 @@ class CampaignAnalyticsState {
 
   CampaignAnalyticsState copyWith({
     AsyncValue<CampaignImpressionsPage>? impressions,
+    AsyncValue<CampaignAnalyticsAggregate>? aggregate,
     AsyncValue<CampaignAnalyticsFiltersData>? filters,
     CampaignAnalyticsDashboardPrefs? prefs,
     CampaignAnalyticsQuery? query,
   }) {
     return CampaignAnalyticsState(
       impressions: impressions ?? this.impressions,
+      aggregate: aggregate ?? this.aggregate,
       filters: filters ?? this.filters,
       prefs: prefs ?? this.prefs,
       query: query ?? this.query,
@@ -152,11 +157,19 @@ class CampaignAnalyticsController
   }
 
   Future<void> fetchImpressions() async {
-    state = state.copyWith(impressions: const AsyncValue.loading());
+    state = state.copyWith(
+      impressions: const AsyncValue.loading(),
+      aggregate: const AsyncValue.loading(),
+    );
 
     try {
       final query = state.query;
-      final response = await _fetchImpressionsWithFallback(query);
+      final results = await Future.wait([
+        _fetchImpressionsWithFallback(query),
+        _fetchAggregate(query),
+      ]);
+      final response = results[0];
+      final aggregate = results[1] as CampaignAnalyticsAggregate;
 
       state = state.copyWith(
         impressions: AsyncValue.data(
@@ -164,6 +177,7 @@ class CampaignAnalyticsController
             response.data as Map<String, dynamic>,
           ),
         ),
+        aggregate: AsyncValue.data(aggregate),
       );
     } on DioException catch (e, st) {
       final serverDetails = _extractServerDetails(e);
@@ -172,9 +186,16 @@ class CampaignAnalyticsController
           serverDetails == null ? e : Exception(serverDetails),
           st,
         ),
+        aggregate: AsyncValue.error(
+          serverDetails == null ? e : Exception(serverDetails),
+          st,
+        ),
       );
     } catch (e, st) {
-      state = state.copyWith(impressions: AsyncValue.error(e, st));
+      state = state.copyWith(
+        impressions: AsyncValue.error(e, st),
+        aggregate: AsyncValue.error(e, st),
+      );
     }
   }
 
@@ -287,6 +308,24 @@ class CampaignAnalyticsController
 
     throw lastBadRequest ??
         StateError('Failed to load campaign impressions for $campaignId');
+  }
+
+  Future<CampaignAnalyticsAggregate> _fetchAggregate(
+    CampaignAnalyticsQuery query,
+  ) async {
+    final aggregateQuery = query.copyWith(page: 0, size: 500);
+    final allRecords = <CampaignImpressionRecord>[];
+
+    while (true) {
+      final response = await _fetchImpressionsWithFallback(aggregateQuery.copyWith(page: allRecords.length ~/ 500));
+      final page = CampaignImpressionsPage.fromJson(
+        response.data as Map<String, dynamic>,
+      );
+      allRecords.addAll(page.content);
+      if (page.last) break;
+    }
+
+    return CampaignAnalyticsAggregate.fromRecords(allRecords);
   }
 
   static String _formatSpaceDateTime(DateTime value) {

@@ -91,6 +91,9 @@ class CampaignAnalyticsScreen extends ConsumerWidget {
               data: (page) => _AnalyticsBody(
                 state: state,
                 page: page,
+                aggregate:
+                    state.aggregate.asData?.value ??
+                    CampaignAnalyticsAggregate.empty(),
                 onPageChange: controller.setPage,
               ),
             ),
@@ -390,37 +393,26 @@ class _Toolbar extends StatelessWidget {
 class _AnalyticsBody extends StatelessWidget {
   final CampaignAnalyticsState state;
   final CampaignImpressionsPage page;
+  final CampaignAnalyticsAggregate aggregate;
   final ValueChanged<int> onPageChange;
 
   const _AnalyticsBody({
     required this.state,
     required this.page,
+    required this.aggregate,
     required this.onPageChange,
   });
 
   @override
   Widget build(BuildContext context) {
     final records = page.content;
-    final stateCounts = <String, int>{};
-    final failureCounts = <String, int>{};
-
-    for (final record in records) {
-      stateCounts.update(record.state, (value) => value + 1, ifAbsent: () => 1);
-      if (record.failureReasonType != null) {
-        failureCounts.update(
-          record.failureReasonType!,
-          (value) => value + 1,
-          ifAbsent: () => 1,
-        );
-      }
-    }
-
-    final wins = records.where((record) => record.isWin).length;
-    final losses = records.where((record) => record.isLoss).length;
-    final successes = records
-        .where((record) => record.state == 'SUCCESS')
-        .length;
-    final lossRate = records.isEmpty ? 0.0 : losses / records.length;
+    final stateCounts = aggregate.stateCounts;
+    final failureCounts = aggregate.failureCounts;
+    final wins = aggregate.wins;
+    final losses = aggregate.losses;
+    final successes = aggregate.successes;
+    final lossRate =
+        aggregate.totalRequests == 0 ? 0.0 : losses / aggregate.totalRequests;
     final hasScreenFilter =
         state.query.address.isNotEmpty || state.query.inventoryGid.isNotEmpty;
     final selectedScreenLabel = [
@@ -440,7 +432,7 @@ class _AnalyticsBody extends StatelessWidget {
               spacing: 10,
               runSpacing: 10,
               children: [
-                _MetricCard(label: 'Запросов', value: '${page.totalElements}'),
+                _MetricCard(label: 'Запросов', value: '${aggregate.totalRequests}'),
                 _MetricCard(label: 'Победы', value: '$wins'),
                 _MetricCard(label: 'Проигрыши', value: '$losses'),
                 if (hasScreenFilter)
@@ -462,7 +454,7 @@ class _AnalyticsBody extends StatelessWidget {
                     (entry) => _BreakdownRow(
                       label: entry.key,
                       value: entry.value,
-                      total: records.length,
+                      total: aggregate.totalRequests,
                     ),
                   )
                   .toList(),
@@ -478,7 +470,7 @@ class _AnalyticsBody extends StatelessWidget {
                     (entry) => _BreakdownRow(
                       label: entry.key,
                       value: entry.value,
-                      total: records.length,
+                      total: aggregate.totalRequests,
                     ),
                   )
                   .toList(),

@@ -181,6 +181,60 @@ class CampaignImpressionsPage {
   }
 }
 
+class CampaignAnalyticsAggregate {
+  final int totalRequests;
+  final int wins;
+  final int losses;
+  final int successes;
+  final Map<String, int> stateCounts;
+  final Map<String, int> failureCounts;
+
+  const CampaignAnalyticsAggregate({
+    required this.totalRequests,
+    required this.wins,
+    required this.losses,
+    required this.successes,
+    required this.stateCounts,
+    required this.failureCounts,
+  });
+
+  factory CampaignAnalyticsAggregate.fromRecords(
+    List<CampaignImpressionRecord> records,
+  ) {
+    final stateCounts = <String, int>{};
+    final failureCounts = <String, int>{};
+
+    for (final record in records) {
+      stateCounts.update(record.state, (value) => value + 1, ifAbsent: () => 1);
+      if (record.failureReasonType != null && record.failureReasonType!.isNotEmpty) {
+        failureCounts.update(
+          record.failureReasonType!,
+          (value) => value + 1,
+          ifAbsent: () => 1,
+        );
+      }
+    }
+
+    return CampaignAnalyticsAggregate(
+      totalRequests: records.length,
+      wins: records.where((record) => record.isWin).length,
+      losses: records.where((record) => record.isLoss).length,
+      successes: records.where((record) => record.state == 'SUCCESS').length,
+      stateCounts: stateCounts,
+      failureCounts: failureCounts,
+    );
+  }
+
+  factory CampaignAnalyticsAggregate.empty() => const CampaignAnalyticsAggregate(
+    totalRequests: 0,
+    wins: 0,
+    losses: 0,
+    successes: 0,
+    stateCounts: {},
+    failureCounts: {},
+  );
+}
+
 class CampaignAnalyticsDashboardPrefs {
   final bool showSummary;
   final bool showStateBreakdown;
