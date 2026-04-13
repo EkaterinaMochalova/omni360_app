@@ -273,6 +273,26 @@ class ServiceDashboardTotals {
   });
 }
 
+class ServiceDashboardOperatorSummary {
+  final int operatorId;
+  final String operatorName;
+  final double spent;
+  final int impressions;
+  final int ots;
+  final double cpm;
+  final int campaignCount;
+
+  const ServiceDashboardOperatorSummary({
+    required this.operatorId,
+    required this.operatorName,
+    required this.spent,
+    required this.impressions,
+    required this.ots,
+    required this.cpm,
+    required this.campaignCount,
+  });
+}
+
 class ServiceDashboardFiltersData {
   final List<String> brands;
   final List<String> advertisers;
