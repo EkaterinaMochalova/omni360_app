@@ -202,6 +202,28 @@ class ServiceDashboardCampaignSummary {
     );
   }
 
+  factory ServiceDashboardCampaignSummary.fromProcessingStats(
+    Campaign campaign,
+    Map<String, dynamic> json,
+  ) {
+    final impressions = (json['showedAmount'] as num?)?.toInt() ?? 0;
+    final spent = _toDouble(json['budgetShowed']);
+    final ots = (json['otsShowed'] as num?)?.toInt() ?? 0;
+    final showPrice = impressions > 0 ? spent / impressions : 0.0;
+    final cpm = impressions > 0 ? showPrice * 1000 : 0.0;
+
+    return ServiceDashboardCampaignSummary(
+      campaignId: int.tryParse(campaign.id) ?? 0,
+      campaignName: campaign.name,
+      budget: campaign.budget ?? _toDouble(json['budget']),
+      spent: spent,
+      impressions: impressions,
+      ots: ots,
+      showPrice: showPrice,
+      cpm: cpm,
+    );
+  }
+
   factory ServiceDashboardCampaignSummary.fromCampaign(Campaign campaign) {
     final budget = campaign.budget ?? 0;
     final spent = campaign.spent ?? 0;

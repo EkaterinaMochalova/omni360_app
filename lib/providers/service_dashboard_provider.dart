@@ -407,16 +407,86 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
     ServiceDashboardQuery query,
     ServiceDashboardFiltersData filters,
   ) async {
-    const chunkSize = 8;
+    const chunkSize = 50;
     final chunkFutures = <Future<List<ServiceDashboardCampaignSummary>>>[];
 
     for (var i = 0; i < campaigns.length; i += chunkSize) {
       final chunk = campaigns.skip(i).take(chunkSize).toList();
-      chunkFutures.add(_fetchImpressionFactChunk(chunk, query, filters));
+      chunkFutures.add(_fetchProcessingFactChunk(chunk, query, filters));
     }
 
     final chunkResults = await Future.wait(chunkFutures);
     return chunkResults.expand((items) => items).toList();
+  }
+
+  Future<List<ServiceDashboardCampaignSummary>> _fetchProcessingFactChunk(
+    List<Campaign> campaigns,
+    ServiceDashboardQuery query,
+    ServiceDashboardFiltersData filters,
+  ) async {
+    final ids = campaigns.map((campaign) => int.tryParse(campaign.id)).whereType<int>().toList();
+    if (ids.isEmpty) return const [];
+
+    final request = <String, dynamic>{
+      'campaignIds': ids,
+      'startDate': _formatApiDateTime(query.start),
+      'endDate': _formatApiDateTime(query.end),
+      'priceMode': 'CUSTOMER_CHARGE_INCLUDED',
+      'withOts': true,
+      'page': 0,
+      'size': campaigns.length,
+    };
+
+    final variants = <Map<String, dynamic>>[
+      request,
+      {'request': jsonEncode(request)},
+    ];
+
+    for (final variant in variants) {
+      try {
+        final response = await _client.dio.get(
+          '/api/v1.0/clients/campaigns/processing-stats',
+          queryParameters: variant,
+          options: Options(listFormat: ListFormat.multi),
+        );
+        final data = response.data;
+        if (data is Map<String, dynamic>) {
+          final content =
+              (data['content'] as List? ?? const [])
+                  .whereType<Map<String, dynamic>>()
+                  .toList();
+          if (content.isNotEmpty) {
+            final byId = <int, Map<String, dynamic>>{};
+            for (final item in content) {
+              final campaignMap = item['campaign'] as Map<String, dynamic>?;
+              final id = (campaignMap?['id'] as num?)?.toInt();
+              if (id != null) byId[id] = item;
+            }
+            return campaigns
+                .map((campaign) {
+                  final id = int.tryParse(campaign.id);
+                  if (id == null) return ServiceDashboardCampaignSummary.fromCampaign(campaign);
+                  final item = byId[id];
+                  if (item == null) {
+                    return ServiceDashboardCampaignSummary.fromCampaign(campaign);
+                  }
+                  return ServiceDashboardCampaignSummary.fromProcessingStats(
+                    campaign,
+                    item,
+                  );
+                })
+                .toList();
+          }
+        }
+      } on DioException catch (e) {
+        // ignore: avoid_print
+        print(
+          '[service-dashboard processing-stats] status=${e.response?.statusCode} data=${e.response?.data}',
+        );
+      }
+    }
+
+    return _fetchImpressionFactChunk(campaigns, query, filters);
   }
 
   Future<List<ServiceDashboardCampaignSummary>> _fetchImpressionFactChunk(
@@ -700,6 +770,12 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
     if (value == null) return null;
     final normalized = value.trim().toLowerCase();
     return normalized.isEmpty ? null : normalized;
+  }
+
+  static String _formatApiDateTime(DateTime value) {
+    String pad(int n) => n.toString().padLeft(2, '0');
+    return '${value.year}-${pad(value.month)}-${pad(value.day)} '
+        '${pad(value.hour)}:${pad(value.minute)}:${pad(value.second)}';
   }
 
   static Set<String> _regionCodesForCity(String city) {
