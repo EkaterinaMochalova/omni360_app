@@ -452,38 +452,72 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
 
     try {
       final rows = <Map<String, dynamic>>[];
-      var page = 0;
-      var totalPages = 1;
+      final queryVariants = [
+        <String, dynamic>{
+          'startDate': _formatSpaceDateTime(query.start.toUtc()),
+          'endDate': _formatSpaceDateTime(query.end.toUtc()),
+          if (selectedOperatorIds.isNotEmpty) 'displayOwnerIds': selectedOperatorIds,
+          if (selectedCityIds.isNotEmpty) 'cities': selectedCityIds,
+        },
+        <String, dynamic>{
+          'localStartDate': _formatSpaceDateTime(query.start),
+          'localEndDate': _formatSpaceDateTime(query.end),
+          if (selectedOperatorIds.isNotEmpty) 'displayOwnerIds': selectedOperatorIds,
+          if (selectedCityIds.isNotEmpty) 'cities': selectedCityIds,
+        },
+        <String, dynamic>{
+          'startDate': _formatSpaceDateTime(query.start.toUtc()),
+          'endDate': _formatSpaceDateTime(query.end.toUtc()),
+        },
+      ];
 
-      do {
-        final response = await _client.dio.get(
-          '/api/v1.0/clients/campaigns/$campaignId/impressions',
-          queryParameters: {
-            'page': page,
-            'size': 1000,
-            'localStartDate': _formatSpaceDateTime(query.start),
-            'localEndDate': _formatSpaceDateTime(query.end),
-            'displayOwnerIds': selectedOperatorIds,
-            'cities': selectedCityIds,
-            'withPlatformFee': false,
-          },
-          options: Options(listFormat: ListFormat.multi),
-        );
+      DioException? lastError;
+      for (final variant in queryVariants) {
+        try {
+          rows.clear();
+          var page = 0;
+          var totalPages = 1;
 
-        final data = response.data;
-        if (data is Map<String, dynamic>) {
-          rows.addAll(
-            (data['content'] as List? ?? const [])
-                .whereType<Map<String, dynamic>>(),
-          );
-          totalPages = (data['totalPages'] as num?)?.toInt() ?? 1;
-        } else {
-          totalPages = 1;
+          do {
+            final response = await _client.dio.get(
+              '/api/v1.0/clients/campaigns/$campaignId/impressions',
+              queryParameters: {
+                'page': page,
+                'size': 200,
+                ...variant,
+              },
+              options: Options(listFormat: ListFormat.multi),
+            );
+
+            final data = response.data;
+            if (data is Map<String, dynamic>) {
+              rows.addAll(
+                (data['content'] as List? ?? const [])
+                    .whereType<Map<String, dynamic>>(),
+              );
+              totalPages = (data['totalPages'] as num?)?.toInt() ?? 1;
+            } else {
+              totalPages = 1;
+            }
+            page++;
+          } while (page < totalPages);
+
+          if (rows.isNotEmpty) {
+            break;
+          }
+        } on DioException catch (e) {
+          lastError = e;
+          continue;
         }
-        page++;
-      } while (page < totalPages);
+      }
 
       if (rows.isEmpty) {
+        if (lastError != null) {
+          // ignore: avoid_print
+          print(
+            '[service-dashboard impressions] campaign=$campaignId status=${lastError.response?.statusCode} data=${lastError.response?.data}',
+          );
+        }
         return ServiceDashboardCampaignSummary.fromCampaign(campaign);
       }
 
