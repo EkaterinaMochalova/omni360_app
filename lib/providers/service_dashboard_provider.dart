@@ -91,8 +91,8 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
 
     state = state.copyWith(summaries: const AsyncValue.loading());
     try {
-      if (state.query.operators.isNotEmpty) {
-        campaigns = await _enrichCampaignsForOperatorFiltering(
+      if (state.query.operators.isNotEmpty || state.query.cities.isNotEmpty) {
+        campaigns = await _enrichCampaignsForFilterDetails(
           campaigns,
           state.query,
         );
@@ -116,28 +116,27 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
     }
   }
 
-  Future<List<Campaign>> _enrichCampaignsForOperatorFiltering(
+  Future<List<Campaign>> _enrichCampaignsForFilterDetails(
     List<Campaign> campaigns,
     ServiceDashboardQuery query,
   ) async {
-    final baseQuery = query.copyWith(operators: const {});
+    final baseQuery = query.copyWith(operators: const {}, cities: const {});
     final candidates = filterCampaigns(campaigns, baseQuery);
-    final missingOperatorDetails = candidates
+    final missingDetails = candidates
         .where(
-          (campaign) =>
-              campaign.displayOwners.isEmpty && campaign.displayOwnerIds.isEmpty,
+          (campaign) => _needsDetailEnrichmentForFilters(campaign, query),
         )
         .toList();
 
-    if (missingOperatorDetails.isEmpty) {
+    if (missingDetails.isEmpty) {
       return campaigns;
     }
 
     final enrichedById = <String, Campaign>{};
     const batchSize = 8;
 
-    for (var i = 0; i < missingOperatorDetails.length; i += batchSize) {
-      final chunk = missingOperatorDetails.skip(i).take(batchSize).toList();
+    for (var i = 0; i < missingDetails.length; i += batchSize) {
+      final chunk = missingDetails.skip(i).take(batchSize).toList();
       final chunkResults = await Future.wait(
         chunk.map(_fetchCampaignDetailSafe),
       );
@@ -162,10 +161,25 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
     return merged;
   }
 
+  bool _needsDetailEnrichmentForFilters(
+    Campaign campaign,
+    ServiceDashboardQuery query,
+  ) {
+    final needsOperatorDetails =
+        query.operators.isNotEmpty &&
+        campaign.displayOwners.isEmpty &&
+        campaign.displayOwnerIds.isEmpty;
+    final needsCityDetails =
+        query.cities.isNotEmpty &&
+        campaign.city == null &&
+        campaign.regionCodes.isEmpty;
+
+    return needsOperatorDetails || needsCityDetails;
+  }
+
   Future<Campaign?> _fetchCampaignDetailSafe(Campaign campaign) async {
     final cached = _campaignDetailCache[campaign.id];
-    if (cached != null &&
-        (cached.displayOwners.isNotEmpty || cached.displayOwnerIds.isNotEmpty)) {
+    if (cached != null && _hasUsefulCampaignDetails(cached)) {
       return cached;
     }
 
@@ -182,6 +196,13 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
     }
 
     return cached ?? campaign;
+  }
+
+  bool _hasUsefulCampaignDetails(Campaign campaign) {
+    return campaign.displayOwners.isNotEmpty ||
+        campaign.displayOwnerIds.isNotEmpty ||
+        campaign.city != null ||
+        campaign.regionCodes.isNotEmpty;
   }
 
   Future<List<ServiceDashboardCampaignSummary>> _fetchCampaignStats(
