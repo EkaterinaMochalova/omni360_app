@@ -165,7 +165,7 @@ class CampaignAnalyticsController
     try {
       final query = state.query;
       final results = await Future.wait([
-        _fetchImpressionsWithFallback(query),
+        _fetchPage(query),
         _fetchAggregate(query),
       ]);
       final response = results[0];
@@ -236,7 +236,28 @@ class CampaignAnalyticsController
 
   Future<void> setPage(int page) async {
     state = state.copyWith(query: state.query.copyWith(page: page));
-    await fetchImpressions();
+    state = state.copyWith(impressions: const AsyncValue.loading());
+
+    try {
+      final response = await _fetchPage(state.query);
+      state = state.copyWith(
+        impressions: AsyncValue.data(
+          CampaignImpressionsPage.fromJson(
+            response.data as Map<String, dynamic>,
+          ),
+        ),
+      );
+    } on DioException catch (e, st) {
+      final serverDetails = _extractServerDetails(e);
+      state = state.copyWith(
+        impressions: AsyncValue.error(
+          serverDetails == null ? e : Exception(serverDetails),
+          st,
+        ),
+      );
+    } catch (e, st) {
+      state = state.copyWith(impressions: AsyncValue.error(e, st));
+    }
   }
 
   Future<void> updatePrefs(CampaignAnalyticsDashboardPrefs prefs) async {
@@ -310,19 +331,37 @@ class CampaignAnalyticsController
         StateError('Failed to load campaign impressions for $campaignId');
   }
 
+  Future<dynamic> _fetchPage(CampaignAnalyticsQuery query) {
+    return _fetchImpressionsWithFallback(query);
+  }
+
   Future<CampaignAnalyticsAggregate> _fetchAggregate(
     CampaignAnalyticsQuery query,
   ) async {
     final aggregateQuery = query.copyWith(page: 0, size: 500);
-    final allRecords = <CampaignImpressionRecord>[];
+    final firstResponse = await _fetchImpressionsWithFallback(aggregateQuery);
+    final firstPage = CampaignImpressionsPage.fromJson(
+      firstResponse.data as Map<String, dynamic>,
+    );
+    final allRecords = <CampaignImpressionRecord>[...firstPage.content];
 
-    while (true) {
-      final response = await _fetchImpressionsWithFallback(aggregateQuery.copyWith(page: allRecords.length ~/ 500));
-      final page = CampaignImpressionsPage.fromJson(
-        response.data as Map<String, dynamic>,
-      );
-      allRecords.addAll(page.content);
-      if (page.last) break;
+    if (firstPage.totalPages > 1) {
+      final futures = <Future<dynamic>>[];
+      for (var pageIndex = 1; pageIndex < firstPage.totalPages; pageIndex++) {
+        futures.add(
+          _fetchImpressionsWithFallback(
+            aggregateQuery.copyWith(page: pageIndex),
+          ),
+        );
+      }
+
+      final responses = await Future.wait(futures);
+      for (final response in responses) {
+        final page = CampaignImpressionsPage.fromJson(
+          response.data as Map<String, dynamic>,
+        );
+        allRecords.addAll(page.content);
+      }
     }
 
     return CampaignAnalyticsAggregate.fromRecords(allRecords);
