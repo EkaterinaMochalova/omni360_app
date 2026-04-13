@@ -407,87 +407,74 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
     ServiceDashboardQuery query,
     ServiceDashboardFiltersData filters,
   ) async {
-    const chunkSize = 40;
+    const chunkSize = 8;
     final chunkFutures = <Future<List<ServiceDashboardCampaignSummary>>>[];
 
     for (var i = 0; i < campaigns.length; i += chunkSize) {
       final chunk = campaigns.skip(i).take(chunkSize).toList();
-      chunkFutures.add(_fetchStatsForCampaignChunk(chunk, query, filters));
+      chunkFutures.add(_fetchInventoryFactChunk(chunk, query, filters));
     }
 
     final chunkResults = await Future.wait(chunkFutures);
     return chunkResults.expand((items) => items).toList();
   }
 
-  Future<List<ServiceDashboardCampaignSummary>> _fetchStatsForCampaignChunk(
+  Future<List<ServiceDashboardCampaignSummary>> _fetchInventoryFactChunk(
     List<Campaign> campaigns,
     ServiceDashboardQuery query,
     ServiceDashboardFiltersData filters,
   ) async {
-    final campaignIds = campaigns
-        .map((campaign) => int.tryParse(campaign.id))
-        .whereType<int>()
-        .toList();
-    if (campaignIds.isEmpty) return const [];
+    final summaries = await Future.wait(
+      campaigns.map((campaign) => _fetchInventoryFactForCampaign(campaign, query, filters)),
+    );
 
-    try {
-      final summaries = await _fetchStatsChunk(campaignIds, query, filters);
-      if (summaries.isNotEmpty) {
-        return summaries;
-      }
-      return campaigns
-          .map(ServiceDashboardCampaignSummary.fromCampaign)
-          .toList();
-    } on DioException catch (e) {
-      final status = e.response?.statusCode ?? 0;
-      if (status < 500) rethrow;
-
-      if (campaigns.length == 1) {
-        return [ServiceDashboardCampaignSummary.fromCampaign(campaigns.first)];
-      }
-
-      final middle = campaigns.length ~/ 2;
-      final left = campaigns.sublist(0, middle);
-      final right = campaigns.sublist(middle);
-      final parts = await Future.wait([
-        _fetchStatsForCampaignChunk(left, query, filters),
-        _fetchStatsForCampaignChunk(right, query, filters),
-      ]);
-      return parts.expand((items) => items).toList();
-    }
+    return summaries.whereType<ServiceDashboardCampaignSummary>().toList();
   }
 
-  Future<List<ServiceDashboardCampaignSummary>> _fetchStatsChunk(
-    List<int> campaignIds,
+  Future<ServiceDashboardCampaignSummary?> _fetchInventoryFactForCampaign(
+    Campaign campaign,
     ServiceDashboardQuery query,
     ServiceDashboardFiltersData filters,
   ) async {
-    final reqList = <String, dynamic>{
-      'campaignIds': campaignIds,
-      'startDate': _formatSpaceDateTime(query.start.toUtc()),
-      'endDate': _formatSpaceDateTime(query.end.toUtc()),
-      'cities': const <int>[],
-      'displayOwnerIds': const <int>[],
-      'creatives': const <int>[],
-      'creativeContents': const <int>[],
-      'states': const <String>[],
-      'groupMode': 'SUMMARY',
-      'page': 0,
-      'size': campaignIds.length,
-      'priceMode': 'CUSTOMER_CHARGE_INCLUDED',
-      'withPlatformFee': false,
-    };
+    final campaignId = int.tryParse(campaign.id);
+    if (campaignId == null) return null;
 
-    final response = await _client.dio.get(
-      '/api/v1.0/clients/impressions/campaigns-stats',
-      queryParameters: {'reqList': jsonEncode(reqList)},
-      options: Options(listFormat: ListFormat.multi),
-    );
-
-    return (response.data as List? ?? const [])
-        .whereType<Map<String, dynamic>>()
-        .map(ServiceDashboardCampaignSummary.fromJson)
+    final selectedOperatorIds = query.operators
+        .map((name) => filters.operatorIds[name])
+        .whereType<int>()
         .toList();
+    final selectedCityIds = query.cities
+        .map((name) => filters.cityIds[name])
+        .whereType<int>()
+        .toList();
+
+    try {
+      final response = await _client.dio.get(
+        '/api/v1.0/clients/campaigns/$campaignId/impression-inventory-stats',
+        queryParameters: {
+          'page': 0,
+          'size': 1000,
+          'localStartDate': _formatSpaceDateTime(query.start),
+          'localEndDate': _formatSpaceDateTime(query.end),
+          'displayOwnerIds': selectedOperatorIds,
+          'cities': selectedCityIds,
+          'withPlatformFee': false,
+        },
+        options: Options(listFormat: ListFormat.multi),
+      );
+
+      final rows = (response.data as List? ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .toList();
+
+      if (rows.isEmpty) {
+        return ServiceDashboardCampaignSummary.fromCampaign(campaign);
+      }
+
+      return ServiceDashboardCampaignSummary.fromInventoryStats(campaign, rows);
+    } on DioException {
+      return ServiceDashboardCampaignSummary.fromCampaign(campaign);
+    }
   }
 
   Future<void> setRange(DateTime start, DateTime end) async {
