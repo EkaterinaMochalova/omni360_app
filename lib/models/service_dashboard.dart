@@ -180,6 +180,28 @@ class ServiceDashboardCampaignSummary {
     );
   }
 
+  factory ServiceDashboardCampaignSummary.fromCampaignStats(
+    Campaign campaign,
+    CampaignStats stats,
+  ) {
+    final impressions = stats.factExits;
+    final spent = stats.factBudget;
+    final ots = stats.factOts.round();
+    final showPrice = impressions > 0 ? spent / impressions : 0.0;
+    final cpm = stats.cpm > 0 ? stats.cpm : (impressions > 0 ? showPrice * 1000 : 0.0);
+
+    return ServiceDashboardCampaignSummary(
+      campaignId: int.tryParse(campaign.id) ?? 0,
+      campaignName: campaign.name,
+      budget: campaign.budget ?? stats.planBudget,
+      spent: spent,
+      impressions: impressions,
+      ots: ots,
+      showPrice: showPrice,
+      cpm: cpm,
+    );
+  }
+
   factory ServiceDashboardCampaignSummary.fromCampaign(Campaign campaign) {
     final budget = campaign.budget ?? 0;
     final spent = campaign.spent ?? 0;

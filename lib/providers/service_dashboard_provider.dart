@@ -441,88 +441,28 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
     final campaignId = int.tryParse(campaign.id);
     if (campaignId == null) return null;
 
-    final selectedOperatorIds = query.operators
-        .map((name) => filters.operatorIds[name])
-        .whereType<int>()
-        .toList();
-    final selectedCityIds = query.cities
-        .map((name) => filters.cityIds[name])
-        .whereType<int>()
-        .toList();
-
     try {
-      final rows = <Map<String, dynamic>>[];
-      final queryVariants = [
-        <String, dynamic>{
-          'startDate': _formatIsoLocalDateTime(query.start.toUtc()),
-          'endDate': _formatIsoLocalDateTime(query.end.toUtc()),
-          if (selectedOperatorIds.isNotEmpty) 'displayOwnerIds': selectedOperatorIds,
-          if (selectedCityIds.isNotEmpty) 'cities': selectedCityIds,
-        },
-        <String, dynamic>{
-          'localStartDate': _formatIsoLocalDateTime(query.start),
-          'localEndDate': _formatIsoLocalDateTime(query.end),
-          if (selectedOperatorIds.isNotEmpty) 'displayOwnerIds': selectedOperatorIds,
-          if (selectedCityIds.isNotEmpty) 'cities': selectedCityIds,
-        },
-        <String, dynamic>{
-          'startDate': _formatIsoLocalDateTime(query.start.toUtc()),
-          'endDate': _formatIsoLocalDateTime(query.end.toUtc()),
-        },
-      ];
-
-      DioException? lastError;
-      for (final variant in queryVariants) {
-        try {
-          rows.clear();
-          var page = 0;
-          var totalPages = 1;
-
-          do {
-            final response = await _client.dio.get(
-              '/api/v1.0/clients/campaigns/$campaignId/impressions',
-              queryParameters: {
-                'page': page,
-                'size': 200,
-                ...variant,
-              },
-              options: Options(listFormat: ListFormat.multi),
-            );
-
-            final data = response.data;
-            if (data is Map<String, dynamic>) {
-              rows.addAll(
-                (data['content'] as List? ?? const [])
-                    .whereType<Map<String, dynamic>>(),
-              );
-              totalPages = (data['totalPages'] as num?)?.toInt() ?? 1;
-            } else {
-              totalPages = 1;
-            }
-            page++;
-          } while (page < totalPages);
-
-          if (rows.isNotEmpty) {
-            break;
-          }
-        } on DioException catch (e) {
-          lastError = e;
-          continue;
-        }
-      }
-
-      if (rows.isEmpty) {
-        if (lastError != null) {
-          // ignore: avoid_print
-          print(
-            '[service-dashboard impressions] campaign=$campaignId status=${lastError.response?.statusCode} data=${lastError.response?.data}',
+      final response = await _client.dio.get(
+        '/api/v1.0/clients/campaigns/$campaignId/impression-stats',
+        queryParameters: {'reqList': '{}'},
+        options: Options(listFormat: ListFormat.multi),
+      );
+      final data = response.data;
+      if (data is Map<String, dynamic>) {
+        final stats = CampaignStats.fromImpressionStats(data);
+        if (stats.hasData || stats.planBudget > 0) {
+          return ServiceDashboardCampaignSummary.fromCampaignStats(
+            campaign,
+            stats,
           );
         }
-        return ServiceDashboardCampaignSummary.fromCampaign(campaign);
       }
-
-      return ServiceDashboardCampaignSummary.fromImpressions(campaign, rows);
-    } on DioException {
+      return ServiceDashboardCampaignSummary.fromCampaign(campaign);
+    } on DioException catch (e) {
+      // ignore: avoid_print
+      print(
+        '[service-dashboard impression-stats] campaign=$campaignId status=${e.response?.statusCode} data=${e.response?.data}',
+      );
       return ServiceDashboardCampaignSummary.fromCampaign(campaign);
     }
   }
@@ -754,12 +694,6 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
       operatorIds: extraFilters?.operatorIds ?? const {},
       cityIds: extraFilters?.cityIds ?? const {},
     );
-  }
-
-  static String _formatIsoLocalDateTime(DateTime value) {
-    String pad(int n) => n.toString().padLeft(2, '0');
-    return '${value.year}-${pad(value.month)}-${pad(value.day)}'
-        'T${pad(value.hour)}:${pad(value.minute)}:${pad(value.second)}';
   }
 
   static String? _normalizeCityName(String? value) {
