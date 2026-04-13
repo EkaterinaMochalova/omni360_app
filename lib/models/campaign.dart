@@ -45,6 +45,7 @@ class Campaign {
   final List<int> segmentIds;
   final List<int> displayOwnerIds;
   final List<String> displayOwners;
+  final Map<String, int> displayOwnerNameToId;
   final List<String> formats;
   final List<TimeSlot>? timeSettings;
 
@@ -71,6 +72,7 @@ class Campaign {
     this.segmentIds = const [],
     this.displayOwnerIds = const [],
     this.displayOwners = const [],
+    this.displayOwnerNameToId = const {},
     this.formats = const [],
     this.timeSettings,
   });
@@ -79,6 +81,7 @@ class Campaign {
     final customer = json['customer'] as Map?;
     final brand = json['brand'] as Map?;
     final displayOwners = _extractDisplayOwners(json);
+    final displayOwnerNameToId = _extractDisplayOwnerNameToId(json);
 
     return Campaign(
       id: (json['id'] ?? json['campaignId'] ?? '').toString(),
@@ -115,6 +118,7 @@ class Campaign {
       segmentIds: _extractSegmentIds(json),
       displayOwnerIds: displayOwners.$1,
       displayOwners: displayOwners.$2,
+      displayOwnerNameToId: displayOwnerNameToId,
       formats: _extractFormats(json),
       timeSettings: (json['timeSettings'] as List?)
           ?.map((e) => TimeSlot.fromJson(e as Map<String, dynamic>))
@@ -168,6 +172,33 @@ class Campaign {
     }
 
     return (ids.toList()..sort(), names.toList()..sort());
+  }
+
+  static Map<String, int> _extractDisplayOwnerNameToId(
+    Map<String, dynamic> json,
+  ) {
+    final result = <String, int>{};
+
+    void addFrom(dynamic value) {
+      if (value is! Map) return;
+      final name = value['name']?.toString();
+      final id = (value['id'] as num?)?.toInt();
+      if (name != null && name.isNotEmpty && id != null) {
+        result[name] = id;
+      }
+    }
+
+    for (final owner in json['displayOwners'] as List? ?? const []) {
+      addFrom(owner);
+    }
+
+    for (final segment in json['segments'] as List? ?? const []) {
+      final segmentMap = segment as Map?;
+      addFrom(segmentMap?['displayOwner']);
+      addFrom(segmentMap?['displayOwnerDTO']);
+    }
+
+    return result;
   }
 
   static List<String> _extractFormats(Map<String, dynamic> json) {
@@ -290,6 +321,7 @@ class Campaign {
     List<int>? segmentIds,
     List<int>? displayOwnerIds,
     List<String>? displayOwners,
+    Map<String, int>? displayOwnerNameToId,
   }) {
     return Campaign(
       id: id,
@@ -314,6 +346,7 @@ class Campaign {
       segmentIds: segmentIds ?? this.segmentIds,
       displayOwnerIds: displayOwnerIds ?? this.displayOwnerIds,
       displayOwners: displayOwners ?? this.displayOwners,
+      displayOwnerNameToId: displayOwnerNameToId ?? this.displayOwnerNameToId,
       formats: formats,
       timeSettings: timeSettings,
     );

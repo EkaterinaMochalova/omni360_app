@@ -274,6 +274,7 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
     final enrichedRegions = {...campaign.regionCodes};
     final enrichedOperatorIds = {...campaign.displayOwnerIds};
     final enrichedOperators = {...campaign.displayOwners};
+    final enrichedOperatorMap = <String, int>{...campaign.displayOwnerNameToId};
     final segmentCache = <int, Map<String, dynamic>>{};
 
     for (final segmentId in campaign.segmentIds) {
@@ -297,6 +298,9 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
         }
         if (displayOwnerName != null && displayOwnerName.isNotEmpty) {
           enrichedOperators.add(displayOwnerName);
+          if (displayOwnerId != null) {
+            enrichedOperatorMap[displayOwnerName] = displayOwnerId;
+          }
         }
 
         void addLocationFrom(dynamic item) {
@@ -337,6 +341,7 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
       regionCodes: enrichedRegions.toList()..sort(),
       displayOwnerIds: enrichedOperatorIds.toList()..sort(),
       displayOwners: enrichedOperators.toList()..sort(),
+      displayOwnerNameToId: enrichedOperatorMap,
     );
   }
 
@@ -1007,6 +1012,8 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
     final operators = <String>{};
     final cities = <String>{};
     final formats = <String>{};
+    final operatorIds = <String, int>{...?extraFilters?.operatorIds};
+    final cityIds = <String, int>{...?extraFilters?.cityIds};
 
     for (final campaign in campaigns) {
       if (campaign.brandName != null && campaign.brandName!.isNotEmpty) {
@@ -1018,8 +1025,12 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
       operators.addAll(
         campaign.displayOwners.where((value) => value.isNotEmpty),
       );
+      operatorIds.addAll(campaign.displayOwnerNameToId);
       if (campaign.city != null && campaign.city!.isNotEmpty) {
         cities.add(campaign.city!);
+        if (campaign.cityIds.isNotEmpty) {
+          cityIds.putIfAbsent(campaign.city!, () => campaign.cityIds.first);
+        }
       }
       formats.addAll(campaign.formats.where((value) => value.isNotEmpty));
     }
@@ -1037,8 +1048,8 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
       operators: sorted(operators),
       cities: sorted(cities),
       formats: sorted(formats),
-      operatorIds: extraFilters?.operatorIds ?? const {},
-      cityIds: extraFilters?.cityIds ?? const {},
+      operatorIds: operatorIds,
+      cityIds: cityIds,
     );
   }
 
