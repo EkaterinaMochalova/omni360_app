@@ -198,7 +198,10 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
         queryParameters: {'withPlatformFee': false},
       );
       if (response.data is Map<String, dynamic>) {
-        return Campaign.fromJson(response.data as Map<String, dynamic>);
+        final detailedCampaign = Campaign.fromJson(
+          response.data as Map<String, dynamic>,
+        );
+        return await _enrichCampaignFromSegments(detailedCampaign);
       }
     } catch (_) {
       return cached ?? campaign;
@@ -213,6 +216,70 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
         campaign.city != null ||
         campaign.cityIds.isNotEmpty ||
         campaign.regionCodes.isNotEmpty;
+  }
+
+  Future<Campaign> _enrichCampaignFromSegments(Campaign campaign) async {
+    if (campaign.segmentIds.isEmpty) {
+      return campaign;
+    }
+
+    final enrichedCityIds = {...campaign.cityIds};
+    final enrichedCities = <String>{
+      if (campaign.city != null && campaign.city!.isNotEmpty) campaign.city!,
+    };
+    final enrichedRegions = {...campaign.regionCodes};
+    final enrichedOperatorIds = {...campaign.displayOwnerIds};
+    final enrichedOperators = {...campaign.displayOwners};
+
+    for (final segmentId in campaign.segmentIds) {
+      try {
+        final response = await _client.dio.get(
+          '/api/v1.0/clients/campaigns/${campaign.id}/segments/$segmentId',
+          queryParameters: {'withPlatformFee': false},
+        );
+
+        final data = response.data;
+        if (data is! Map<String, dynamic>) continue;
+
+        final city = data['city'] as Map?;
+        final cityId = (city?['id'] as num?)?.toInt();
+        final cityName = city?['name']?.toString();
+        if (cityId != null) {
+          enrichedCityIds.add(cityId);
+        }
+        if (cityName != null && cityName.isNotEmpty) {
+          enrichedCities.add(cityName);
+        }
+
+        final region = data['region'] as Map?;
+        final regionName = region?['name']?.toString();
+        if (regionName != null && regionName.isNotEmpty) {
+          enrichedRegions.add(regionName.toUpperCase());
+        }
+
+        final displayOwnerId =
+            (data['displayOwnerId'] as num?)?.toInt() ??
+            ((data['displayOwner'] as Map?)?['id'] as num?)?.toInt();
+        final displayOwnerName =
+            (data['displayOwner'] as Map?)?['name']?.toString();
+        if (displayOwnerId != null) {
+          enrichedOperatorIds.add(displayOwnerId);
+        }
+        if (displayOwnerName != null && displayOwnerName.isNotEmpty) {
+          enrichedOperators.add(displayOwnerName);
+        }
+      } catch (_) {
+        continue;
+      }
+    }
+
+    return campaign.copyWith(
+      city: enrichedCities.isEmpty ? campaign.city : enrichedCities.first,
+      cityIds: enrichedCityIds.toList()..sort(),
+      regionCodes: enrichedRegions.toList()..sort(),
+      displayOwnerIds: enrichedOperatorIds.toList()..sort(),
+      displayOwners: enrichedOperators.toList()..sort(),
+    );
   }
 
   Future<List<ServiceDashboardCampaignSummary>> _fetchCampaignStats(
@@ -244,7 +311,13 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
     if (campaignIds.isEmpty) return const [];
 
     try {
-      return await _fetchStatsChunk(campaignIds, query, filters);
+      final summaries = await _fetchStatsChunk(campaignIds, query, filters);
+      if (summaries.isNotEmpty) {
+        return summaries;
+      }
+      return campaigns
+          .map(ServiceDashboardCampaignSummary.fromCampaign)
+          .toList();
     } on DioException catch (e) {
       final status = e.response?.statusCode ?? 0;
       if (status < 500) rethrow;

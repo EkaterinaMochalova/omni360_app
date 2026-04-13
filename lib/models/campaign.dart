@@ -42,6 +42,7 @@ class Campaign {
   final String? city;
   final List<int> cityIds;
   final List<String> regionCodes;
+  final List<int> segmentIds;
   final List<int> displayOwnerIds;
   final List<String> displayOwners;
   final List<String> formats;
@@ -67,6 +68,7 @@ class Campaign {
     this.city,
     this.cityIds = const [],
     this.regionCodes = const [],
+    this.segmentIds = const [],
     this.displayOwnerIds = const [],
     this.displayOwners = const [],
     this.formats = const [],
@@ -110,6 +112,7 @@ class Campaign {
           (json['targetCity'] as Map?)?['name']?.toString(),
       cityIds: _extractCityIds(json),
       regionCodes: _extractRegionCodes(json),
+      segmentIds: _extractSegmentIds(json),
       displayOwnerIds: displayOwners.$1,
       displayOwners: displayOwners.$2,
       formats: _extractFormats(json),
@@ -212,6 +215,19 @@ class Campaign {
     return ids.toList()..sort();
   }
 
+  static List<int> _extractSegmentIds(Map<String, dynamic> json) {
+    final ids = <int>{};
+
+    for (final segment in json['segments'] as List? ?? const []) {
+      final id = ((segment as Map?)?['id'] as num?)?.toInt();
+      if (id != null) {
+        ids.add(id);
+      }
+    }
+
+    return ids.toList()..sort();
+  }
+
   static List<String> _extractRegionCodes(Map<String, dynamic> json) {
     final codes = <String>{};
 
@@ -264,6 +280,42 @@ class Campaign {
         s == 'на паузе' ||
         s == 'приостановлена' ||
         s.contains('pause');
+  }
+
+  Campaign copyWith({
+    String? city,
+    List<int>? cityIds,
+    List<String>? regionCodes,
+    List<int>? segmentIds,
+    List<int>? displayOwnerIds,
+    List<String>? displayOwners,
+  }) {
+    return Campaign(
+      id: id,
+      name: name,
+      status: status,
+      advertiser: advertiser,
+      customerId: customerId,
+      customerName: customerName,
+      brandId: brandId,
+      brandName: brandName,
+      budget: budget,
+      dailyBudget: dailyBudget,
+      spent: spent,
+      ots: ots,
+      exits: exits,
+      startDate: startDate,
+      endDate: endDate,
+      type: type,
+      city: city ?? this.city,
+      cityIds: cityIds ?? this.cityIds,
+      regionCodes: regionCodes ?? this.regionCodes,
+      segmentIds: segmentIds ?? this.segmentIds,
+      displayOwnerIds: displayOwnerIds ?? this.displayOwnerIds,
+      displayOwners: displayOwners ?? this.displayOwners,
+      formats: formats,
+      timeSettings: timeSettings,
+    );
   }
 
   bool get isNotOnSchedule {

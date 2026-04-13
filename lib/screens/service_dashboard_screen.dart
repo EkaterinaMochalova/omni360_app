@@ -102,27 +102,27 @@ class ServiceDashboardScreen extends ConsumerWidget {
                         runSpacing: 10,
                         children: [
                           _KpiCard(
-                            label: 'Бюджет общий',
+                            label: 'Бюджет общий (план)',
                             value: _money(totals.totalBudget),
                           ),
                           _KpiCard(
-                            label: 'Потрачено',
+                            label: 'Потрачено (факт)',
                             value: _money(totals.totalSpent),
                           ),
                           _KpiCard(
-                            label: 'Средняя ставка',
+                            label: 'Средняя ставка (факт)',
                             value: _money(totals.averageBid),
                           ),
                           _KpiCard(
-                            label: 'Средний CPM',
+                            label: 'Средний CPM (факт)',
                             value: _money(totals.averageCpm),
                           ),
                           _KpiCard(
-                            label: 'Всего показов',
+                            label: 'Всего показов (факт)',
                             value: _int(totals.totalImpressions),
                           ),
                           _KpiCard(
-                            label: 'Всего OTS',
+                            label: 'Всего OTS (факт)',
                             value: _int(totals.totalOts),
                           ),
                           _KpiCard(
@@ -139,7 +139,7 @@ class ServiceDashboardScreen extends ConsumerWidget {
                     const SizedBox(height: 12),
                     _SectionCard(
                       title: 'Топ кампаний',
-                      subtitle: 'По потраченному бюджету за период',
+                      subtitle: 'По потраченному бюджету (факт) за период',
                       child: sorted.isEmpty
                           ? const Text(
                               'Нет данных по выбранным фильтрам.',
