@@ -98,7 +98,11 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
         );
       }
 
-      final filteredCampaigns = filterCampaigns(campaigns, state.query);
+      final filteredCampaigns = filterCampaigns(
+        campaigns,
+        state.query,
+        filters: state.filters,
+      );
       if (filteredCampaigns.isEmpty) {
         state = state.copyWith(summaries: const AsyncValue.data([]));
         return;
@@ -121,7 +125,11 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
     ServiceDashboardQuery query,
   ) async {
     final baseQuery = query.copyWith(operators: const {}, cities: const {});
-    final candidates = filterCampaigns(campaigns, baseQuery);
+    final candidates = filterCampaigns(
+      campaigns,
+      baseQuery,
+      filters: state.filters,
+    );
     final missingDetails = candidates
         .where(
           (campaign) => _needsDetailEnrichmentForFilters(campaign, query),
@@ -317,9 +325,14 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
 
   static List<Campaign> filterCampaigns(
     List<Campaign> campaigns,
-    ServiceDashboardQuery query,
-  ) {
+    ServiceDashboardQuery query, {
+    ServiceDashboardFiltersData? filters,
+  }) {
     final search = query.campaignSearch.trim().toLowerCase();
+    final selectedOperatorIds = query.operators
+        .map((name) => filters?.operatorIds[name])
+        .whereType<int>()
+        .toSet();
 
     return campaigns.where((campaign) {
       final matchesSearch =
@@ -334,7 +347,8 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
               query.advertisers.contains(campaign.customerName));
       final matchesOperator =
           query.operators.isEmpty ||
-          campaign.displayOwners.any(query.operators.contains);
+          campaign.displayOwners.any(query.operators.contains) ||
+          campaign.displayOwnerIds.any(selectedOperatorIds.contains);
       final matchesCity = _matchesSelectedCities(campaign, query.cities);
       final matchesFormat =
           query.formats.isEmpty || campaign.formats.any(query.formats.contains);
