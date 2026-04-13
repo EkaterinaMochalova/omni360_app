@@ -142,6 +142,44 @@ class ServiceDashboardCampaignSummary {
     );
   }
 
+  factory ServiceDashboardCampaignSummary.fromImpressions(
+    Campaign campaign,
+    List<Map<String, dynamic>> rows,
+  ) {
+    final spent = rows.fold<double>(
+      0,
+      (sum, row) =>
+          sum +
+          _toDouble(
+            row['chargedPrice'] ?? row['price'] ?? row['chargedCpm'],
+          ),
+    );
+    final impressions = rows.length;
+    final ots = rows.fold<int>(
+      0,
+      (sum, row) =>
+          sum +
+          ((row['ots'] as num?)?.toInt() ??
+              (row['dmpOts'] as num?)?.toInt() ??
+              (row['opOts'] as num?)?.toInt() ??
+              (row['estOts'] as num?)?.toInt() ??
+              0),
+    );
+    final showPrice = impressions > 0 ? spent / impressions : 0.0;
+    final cpm = impressions > 0 ? showPrice * 1000 : 0.0;
+
+    return ServiceDashboardCampaignSummary(
+      campaignId: int.tryParse(campaign.id) ?? 0,
+      campaignName: campaign.name,
+      budget: campaign.budget ?? 0,
+      spent: spent,
+      impressions: impressions,
+      ots: ots,
+      showPrice: showPrice,
+      cpm: cpm,
+    );
+  }
+
   factory ServiceDashboardCampaignSummary.fromCampaign(Campaign campaign) {
     final budget = campaign.budget ?? 0;
     final spent = campaign.spent ?? 0;
