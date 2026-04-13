@@ -40,6 +40,7 @@ class Campaign {
   final String? endDate;
   final String? type;
   final String? city;
+  final List<String> regionCodes;
   final List<int> displayOwnerIds;
   final List<String> displayOwners;
   final List<String> formats;
@@ -63,6 +64,7 @@ class Campaign {
     this.endDate,
     this.type,
     this.city,
+    this.regionCodes = const [],
     this.displayOwnerIds = const [],
     this.displayOwners = const [],
     this.formats = const [],
@@ -104,6 +106,7 @@ class Campaign {
       city:
           json['city']?.toString() ??
           (json['targetCity'] as Map?)?['name']?.toString(),
+      regionCodes: _extractRegionCodes(json),
       displayOwnerIds: displayOwners.$1,
       displayOwners: displayOwners.$2,
       formats: _extractFormats(json),
@@ -181,6 +184,26 @@ class Campaign {
     }
 
     return formats.toList()..sort();
+  }
+
+  static List<String> _extractRegionCodes(Map<String, dynamic> json) {
+    final codes = <String>{};
+
+    void add(dynamic value) {
+      final stringValue = value?.toString().trim().toUpperCase();
+      if (stringValue != null && stringValue.isNotEmpty) {
+        codes.add(stringValue);
+      }
+    }
+
+    for (final segment in json['segments'] as List? ?? const []) {
+      final segmentMap = segment as Map?;
+      for (final region in segmentMap?['regions'] as List? ?? const []) {
+        add(region);
+      }
+    }
+
+    return codes.toList()..sort();
   }
 
   static String? _trimDate(String? raw) {
