@@ -58,6 +58,7 @@ class ServiceDashboardScreen extends ConsumerWidget {
               final now = DateTime.now();
               controller.setRange(now.subtract(const Duration(days: 30)), now);
             },
+            onPickCustomRange: () => _pickCustomRange(context, controller),
           ),
           Expanded(
             child: state.summaries.when(
@@ -99,15 +100,20 @@ class ServiceDashboardScreen extends ConsumerWidget {
                       ),
                     _SectionCard(
                       title: 'KPI',
-                      subtitle:
-                          'Агрегировано по ${filteredCampaigns.length} кампаниям за выбранный период',
+                      subtitle: hasActiveFilters
+                          ? 'Плановый бюджет показан по всем кампаниям. Факт и доли считаются по текущим фильтрам за выбранный период.'
+                          : 'Агрегировано по ${filteredCampaigns.length} кампаниям за выбранный период',
                       child: Wrap(
                         spacing: 10,
                         runSpacing: 10,
                         children: [
                           _KpiCard(
-                            label: 'Бюджет общий (план)',
-                            value: _money(totals.totalBudget),
+                            label: 'Бюджет общий (план, все кампании)',
+                            value: _money(
+                              hasActiveFilters
+                                  ? overallTotals.totalBudget
+                                  : totals.totalBudget,
+                            ),
                           ),
                           _KpiCard(
                             label: 'Потрачено (факт)',
@@ -315,6 +321,68 @@ class ServiceDashboardScreen extends ConsumerWidget {
     );
   }
 
+  Future<void> _pickCustomRange(
+    BuildContext context,
+    ServiceDashboardController controller,
+  ) async {
+    final now = DateTime.now();
+    final picked = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(now.year - 2),
+      lastDate: now,
+      initialDateRange: DateTimeRange(
+        start: now.subtract(const Duration(days: 7)),
+        end: now,
+      ),
+      helpText: 'Выбери период',
+      saveText: 'Применить',
+      cancelText: 'Отмена',
+      fieldStartHintText: 'Начало',
+      fieldEndHintText: 'Конец',
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: Theme.of(context).colorScheme.copyWith(
+              primary: kAccent,
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+
+    if (picked == null || !context.mounted) return;
+
+    final start = DateTime(
+      picked.start.year,
+      picked.start.month,
+      picked.start.day,
+    );
+    final end = DateTime(
+      picked.end.year,
+      picked.end.month,
+      picked.end.day,
+      23,
+      59,
+      59,
+    );
+    final inclusiveDays = end
+            .difference(start)
+            .inDays +
+        1;
+
+    if (inclusiveDays > 31) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Период не должен превышать 31 день.'),
+        ),
+      );
+      return;
+    }
+
+    await controller.setRange(start, end);
+  }
+
   ServiceDashboardTotals _buildTotals(
     List<Campaign> campaigns,
     List<ServiceDashboardCampaignSummary> summaries,
@@ -382,13 +450,20 @@ class ServiceDashboardScreen extends ConsumerWidget {
   static String? _shareText(double value, double total) {
     if (total <= 0) return null;
     final percent = (value / total) * 100;
-    return '${percent.toStringAsFixed(percent >= 10 ? 0 : 1)}% от общего';
+    return '${_formatPercent(percent)} от общего';
   }
 
   static String? _shareTextInt(int value, int total) {
     if (total <= 0) return null;
     final percent = (value / total) * 100;
-    return '${percent.toStringAsFixed(percent >= 10 ? 0 : 1)}% от общего';
+    return '${_formatPercent(percent)} от общего';
+  }
+
+  static String _formatPercent(double percent) {
+    if (percent >= 10) return percent.toStringAsFixed(0);
+    if (percent >= 1) return percent.toStringAsFixed(1);
+    if (percent >= 0.1) return percent.toStringAsFixed(2);
+    return percent.toStringAsFixed(3);
   }
 }
 
@@ -396,11 +471,13 @@ class _DashboardToolbar extends StatelessWidget {
   final ServiceDashboardQuery query;
   final VoidCallback onSetLast7Days;
   final VoidCallback onSetLast30Days;
+  final VoidCallback onPickCustomRange;
 
   const _DashboardToolbar({
     required this.query,
     required this.onSetLast7Days,
     required this.onSetLast30Days,
+    required this.onPickCustomRange,
   });
 
   @override
@@ -417,6 +494,8 @@ class _DashboardToolbar extends StatelessWidget {
               _RangeChip(label: '7 дней', onTap: onSetLast7Days),
               const SizedBox(width: 8),
               _RangeChip(label: '30 дней', onTap: onSetLast30Days),
+              const SizedBox(width: 8),
+              _RangeChip(label: 'Выбрать даты', onTap: onPickCustomRange),
             ],
           ),
           const SizedBox(height: 6),
