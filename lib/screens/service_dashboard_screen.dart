@@ -75,11 +75,11 @@ class ServiceDashboardScreen extends ConsumerWidget {
                 ),
               ),
               data: (summaries) {
+                final overallSummaries =
+                    state.overallSummaries.asData?.value ?? const <ServiceDashboardCampaignSummary>[];
                 final totals = _buildTotals(filteredCampaigns, summaries);
-                final operatorSummaries =
-                    state.operatorSummaries.asData?.value ?? const <ServiceDashboardOperatorSummary>[];
-                final citySummaries =
-                    state.citySummaries.asData?.value ?? const <ServiceDashboardCitySummary>[];
+                final overallTotals = _buildTotals(campaigns, overallSummaries);
+                final hasActiveFilters = _activeFilters(state.query).isNotEmpty;
                 final sorted = [...summaries]
                   ..sort((a, b) => b.spent.compareTo(a.spent));
 
@@ -108,6 +108,12 @@ class ServiceDashboardScreen extends ConsumerWidget {
                           _KpiCard(
                             label: 'Бюджет общий (план)',
                             value: _money(totals.totalBudget),
+                            shareText: hasActiveFilters
+                                ? _shareText(
+                                    totals.totalBudget,
+                                    overallTotals.totalBudget,
+                                  )
+                                : null,
                           ),
                           _KpiCard(
                             label: 'Потрачено (факт)',
@@ -124,10 +130,22 @@ class ServiceDashboardScreen extends ConsumerWidget {
                           _KpiCard(
                             label: 'Всего показов (факт)',
                             value: _int(totals.totalImpressions),
+                            shareText: hasActiveFilters
+                                ? _shareTextInt(
+                                    totals.totalImpressions,
+                                    overallTotals.totalImpressions,
+                                  )
+                                : null,
                           ),
                           _KpiCard(
                             label: 'Всего OTS (факт)',
                             value: _int(totals.totalOts),
+                            shareText: hasActiveFilters
+                                ? _shareTextInt(
+                                    totals.totalOts,
+                                    overallTotals.totalOts,
+                                  )
+                                : null,
                           ),
                           _KpiCard(
                             label: 'Кампаний',
@@ -166,42 +184,6 @@ class ServiceDashboardScreen extends ConsumerWidget {
                               }).toList(),
                             ),
                     ),
-                    if (state.query.operators.isNotEmpty &&
-                        operatorSummaries.isNotEmpty) ...[
-                      const SizedBox(height: 12),
-                      _SectionCard(
-                        title: 'По подрядчикам',
-                        subtitle: 'Факт по выбранным подрядчикам за период',
-                        child: operatorSummaries.isEmpty
-                            ? const Text(
-                                'Нет данных по выбранным подрядчикам.',
-                                style: TextStyle(color: kTextSecondary),
-                              )
-                            : Column(
-                                children: operatorSummaries.map((summary) {
-                                  return _OperatorSummaryRow(summary: summary);
-                                }).toList(),
-                              ),
-                      ),
-                    ],
-                    if (state.query.cities.isNotEmpty &&
-                        citySummaries.isNotEmpty) ...[
-                      const SizedBox(height: 12),
-                      _SectionCard(
-                        title: 'По городам',
-                        subtitle: 'Факт по выбранным городам за период',
-                        child: citySummaries.isEmpty
-                            ? const Text(
-                                'Нет данных по выбранным городам.',
-                                style: TextStyle(color: kTextSecondary),
-                              )
-                            : Column(
-                                children: citySummaries.map((summary) {
-                                  return _CitySummaryRow(summary: summary);
-                                }).toList(),
-                              ),
-                      ),
-                    ],
                   ],
                 );
               },
@@ -396,6 +378,18 @@ class ServiceDashboardScreen extends ConsumerWidget {
 
   static String _int(num value) =>
       NumberFormat.decimalPattern('ru_RU').format(value);
+
+  static String? _shareText(double value, double total) {
+    if (total <= 0) return null;
+    final percent = (value / total) * 100;
+    return '${percent.toStringAsFixed(percent >= 10 ? 0 : 1)}% от общего';
+  }
+
+  static String? _shareTextInt(int value, int total) {
+    if (total <= 0) return null;
+    final percent = (value / total) * 100;
+    return '${percent.toStringAsFixed(percent >= 10 ? 0 : 1)}% от общего';
+  }
 }
 
 class _DashboardToolbar extends StatelessWidget {
@@ -518,8 +512,13 @@ class _SectionCard extends StatelessWidget {
 class _KpiCard extends StatelessWidget {
   final String label;
   final String value;
+  final String? shareText;
 
-  const _KpiCard({required this.label, required this.value});
+  const _KpiCard({
+    required this.label,
+    required this.value,
+    this.shareText,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -546,6 +545,17 @@ class _KpiCard extends StatelessWidget {
               fontSize: 20,
             ),
           ),
+          if (shareText != null) ...[
+            const SizedBox(height: 4),
+            Text(
+              shareText!,
+              style: const TextStyle(
+                color: kAccent,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -680,137 +690,6 @@ class _MiniStat extends StatelessWidget {
   }
 }
 
-class _OperatorSummaryRow extends StatelessWidget {
-  final ServiceDashboardOperatorSummary summary;
-
-  const _OperatorSummaryRow({required this.summary});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: kBg,
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  summary.operatorName,
-                  style: const TextStyle(
-                    color: kTextPrimary,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-              Text(
-                ServiceDashboardScreen._money(summary.spent),
-                style: const TextStyle(
-                  color: kTextPrimary,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 14,
-            runSpacing: 8,
-            children: [
-              _MiniStat(
-                label: 'Кампаний',
-                value: ServiceDashboardScreen._int(summary.campaignCount),
-              ),
-              _MiniStat(
-                label: 'Показы',
-                value: ServiceDashboardScreen._int(summary.impressions),
-              ),
-              _MiniStat(
-                label: 'OTS',
-                value: ServiceDashboardScreen._int(summary.ots),
-              ),
-              _MiniStat(
-                label: 'CPM',
-                value: ServiceDashboardScreen._money(summary.cpm),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _CitySummaryRow extends StatelessWidget {
-  final ServiceDashboardCitySummary summary;
-
-  const _CitySummaryRow({required this.summary});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: kBg,
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  summary.cityName,
-                  style: const TextStyle(
-                    color: kTextPrimary,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-              Text(
-                ServiceDashboardScreen._money(summary.spent),
-                style: const TextStyle(
-                  color: kTextPrimary,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 14,
-            runSpacing: 8,
-            children: [
-              _MiniStat(
-                label: 'Кампаний',
-                value: ServiceDashboardScreen._int(summary.campaignCount),
-              ),
-              _MiniStat(
-                label: 'Показы',
-                value: ServiceDashboardScreen._int(summary.impressions),
-              ),
-              _MiniStat(
-                label: 'OTS',
-                value: ServiceDashboardScreen._int(summary.ots),
-              ),
-              _MiniStat(
-                label: 'CPM',
-                value: ServiceDashboardScreen._money(summary.cpm),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
 
 class _MultiSelectSection extends StatelessWidget {
   final String title;
