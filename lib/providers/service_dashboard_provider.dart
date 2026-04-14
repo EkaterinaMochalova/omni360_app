@@ -529,9 +529,9 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
       'customerIds': const <int>[],
       'priceMode': 'CUSTOMER_CHARGE_INCLUDED',
       'withPlatformFee': false,
-      'groupMode': 'SUMMARY',
+      'groupMode': 'DAILY',
       'page': 0,
-      'size': campaigns.length,
+      'size': campaigns.length * 40,
     };
 
     try {
@@ -541,21 +541,26 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
       );
       final data = response.data;
       if (data is List) {
-        final byId = <int, Map<String, dynamic>>{};
+        final byId = <int, List<Map<String, dynamic>>>{};
         for (final item in data.whereType<Map<String, dynamic>>()) {
           final campaignMap = item['campaign'] as Map<String, dynamic>?;
           final id = (campaignMap?['id'] as num?)?.toInt();
-          if (id != null) byId[id] = item;
+          if (id != null) {
+            byId.putIfAbsent(id, () => []).add(item);
+          }
         }
 
         if (byId.isNotEmpty) {
           return campaigns.map((campaign) {
             final id = int.tryParse(campaign.id);
-            final item = id == null ? null : byId[id];
-            if (item == null) {
+            final rows = id == null ? null : byId[id];
+            if (rows == null || rows.isEmpty) {
               return ServiceDashboardCampaignSummary.fromCampaign(campaign);
             }
-            return ServiceDashboardCampaignSummary.fromJson(item);
+            return ServiceDashboardCampaignSummary.fromCampaignsStatsRows(
+              campaign,
+              rows,
+            );
           }).toList();
         }
       }

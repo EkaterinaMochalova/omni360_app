@@ -114,6 +114,54 @@ class ServiceDashboardCampaignSummary {
     );
   }
 
+  factory ServiceDashboardCampaignSummary.fromCampaignsStatsRows(
+    Campaign campaign,
+    List<Map<String, dynamic>> rows,
+  ) {
+    final spent = rows.fold<double>(
+      0,
+      (sum, row) =>
+          sum +
+          _toDouble(
+            (row['customerStats'] as Map<String, dynamic>?)?['dailyBudgetShowed'] ??
+                row['dailyBudgetShowed'] ??
+                (row['customerStats'] as Map<String, dynamic>?)?['budgetShowed'] ??
+                row['totalBudgetShowed'],
+          ),
+    );
+    final impressions = rows.fold<int>(
+      0,
+      (sum, row) =>
+          sum +
+          ((row['dailyCountShowed'] as num?)?.toInt() ??
+              (row['totalCountShowed'] as num?)?.toInt() ??
+              0),
+    );
+    final ots = rows.fold<int>(
+      0,
+      (sum, row) =>
+          sum +
+          ((row['dailyOtsShowed'] as num?)?.toInt() ??
+              (row['otsCountShowed'] as num?)?.toInt() ??
+              (row['dailyEstimatedOts'] as num?)?.toInt() ??
+              (row['totalEstimatedOts'] as num?)?.toInt() ??
+              0),
+    );
+    final showPrice = impressions > 0 ? spent / impressions : 0.0;
+    final cpm = impressions > 0 ? (spent / impressions) * 1000 : 0.0;
+
+    return ServiceDashboardCampaignSummary(
+      campaignId: int.tryParse(campaign.id) ?? 0,
+      campaignName: campaign.name,
+      budget: campaign.budget ?? 0,
+      spent: spent,
+      impressions: impressions,
+      ots: ots,
+      showPrice: showPrice,
+      cpm: cpm,
+    );
+  }
+
   factory ServiceDashboardCampaignSummary.fromInventoryStats(
     Campaign campaign,
     List<Map<String, dynamic>> rows,
