@@ -81,19 +81,36 @@ class ServiceDashboardCampaignSummary {
 
   factory ServiceDashboardCampaignSummary.fromJson(Map<String, dynamic> json) {
     final campaign = json['campaign'] as Map<String, dynamic>?;
+    final customerStats = json['customerStats'] as Map<String, dynamic>?;
+    final impressions = (json['totalCountShowed'] as num?)?.toInt() ?? 0;
+    final showPrice = _toDouble(json['showPrice']);
+    final rawCpm = _toDouble(json['cpm']);
+    final spentFromShowPrice = impressions > 0 ? showPrice * impressions : 0.0;
+    final spentFromCpm = impressions > 0 ? (rawCpm * impressions) / 1000 : 0.0;
+    final spent = [
+      spentFromShowPrice,
+      spentFromCpm,
+      _toDouble(customerStats?['budgetShowed']),
+      _toDouble(customerStats?['dailyBudgetShowed']),
+      _toDouble(json['dailyBudgetShowed']),
+      _toDouble(json['totalBudgetShowed']),
+    ].firstWhere((value) => value > 0, orElse: () => 0.0);
+    final resolvedShowPrice = impressions > 0 ? spent / impressions : showPrice;
+    final resolvedCpm = impressions > 0 ? (spent / impressions) * 1000 : rawCpm;
+
     return ServiceDashboardCampaignSummary(
       campaignId: (campaign?['id'] as num?)?.toInt() ?? 0,
       campaignName: campaign?['name']?.toString() ?? 'Без названия',
       budget: _toDouble(json['budget']),
-      spent: _toDouble(json['totalBudgetShowed']),
-      impressions: (json['totalCountShowed'] as num?)?.toInt() ?? 0,
+      spent: spent,
+      impressions: impressions,
       ots:
           (json['otsCountShowed'] as num?)?.toInt() ??
           (json['totalDmpOts'] as num?)?.toInt() ??
           (json['totalEstimatedOts'] as num?)?.toInt() ??
           0,
-      showPrice: _toDouble(json['showPrice']),
-      cpm: _toDouble(json['cpm']),
+      showPrice: resolvedShowPrice,
+      cpm: resolvedCpm,
     );
   }
 

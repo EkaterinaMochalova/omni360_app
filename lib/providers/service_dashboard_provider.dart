@@ -768,43 +768,40 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
         .where((entry) => entry.value != null)
         .map((entry) => MapEntry(entry.key, entry.value!))
         .toList();
-    final selectedCityIds = query.cities
-        .map((name) => filters.cityIds[name])
-        .whereType<int>()
-        .toList();
-
     if (selectedOperators.isEmpty) return const [];
 
     final aggregates = <int, _OperatorAggregate>{};
-    const batchSize = 8;
+    const batchSize = 50;
 
     for (final operator in selectedOperators) {
       for (var i = 0; i < campaigns.length; i += batchSize) {
         final chunk = campaigns.skip(i).take(batchSize).toList();
-        final chunkRows = await Future.wait(
-          chunk.map((campaign) async {
-            final campaignId = int.tryParse(campaign.id);
-            if (campaignId == null) return null;
-            final rows = await _fetchInventoryStatsRows(
-              campaignId: campaignId,
-              query: query,
-              selectedOperatorIds: [operator.value],
-              selectedCityIds: selectedCityIds,
-            );
-            if (rows == null || rows.isEmpty) return null;
-            return MapEntry(
-              campaign,
-              ServiceDashboardCampaignSummary.fromInventoryStats(campaign, rows),
-            );
-          }),
+        final operatorQuery = query.copyWith(
+          operators: {operator.key},
+          cities: query.cities,
+        );
+        final chunkSummaries = await _fetchCampaignsStatsSlice(
+          chunk,
+          operatorQuery,
+          filters,
         );
 
-        for (final row in chunkRows.whereType<MapEntry<Campaign, ServiceDashboardCampaignSummary>>()) {
+        for (final summary in chunkSummaries.where(
+          (item) => item.spent > 0 || item.impressions > 0 || item.ots > 0,
+        )) {
+          final campaign = chunk.firstWhere(
+            (item) => int.tryParse(item.id) == summary.campaignId,
+            orElse: () => Campaign(
+              id: summary.campaignId.toString(),
+              name: summary.campaignName,
+              status: 'unknown',
+            ),
+          );
           final aggregate = aggregates.putIfAbsent(
             operator.value,
             () => _OperatorAggregate(operatorId: operator.value, operatorName: operator.key),
           );
-          aggregate.add(row.key, row.value);
+          aggregate.add(campaign, summary);
         }
       }
     }
@@ -826,43 +823,40 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
         .where((entry) => entry.value != null)
         .map((entry) => MapEntry(entry.key, entry.value!))
         .toList();
-    final selectedOperatorIds = query.operators
-        .map((name) => filters.operatorIds[name])
-        .whereType<int>()
-        .toList();
-
     if (selectedCities.isEmpty) return const [];
 
     final aggregates = <int, _CityAggregate>{};
-    const batchSize = 8;
+    const batchSize = 50;
 
     for (final city in selectedCities) {
       for (var i = 0; i < campaigns.length; i += batchSize) {
         final chunk = campaigns.skip(i).take(batchSize).toList();
-        final chunkRows = await Future.wait(
-          chunk.map((campaign) async {
-            final campaignId = int.tryParse(campaign.id);
-            if (campaignId == null) return null;
-            final rows = await _fetchInventoryStatsRows(
-              campaignId: campaignId,
-              query: query,
-              selectedOperatorIds: selectedOperatorIds,
-              selectedCityIds: [city.value],
-            );
-            if (rows == null || rows.isEmpty) return null;
-            return MapEntry(
-              campaign,
-              ServiceDashboardCampaignSummary.fromInventoryStats(campaign, rows),
-            );
-          }),
+        final cityQuery = query.copyWith(
+          operators: query.operators,
+          cities: {city.key},
+        );
+        final chunkSummaries = await _fetchCampaignsStatsSlice(
+          chunk,
+          cityQuery,
+          filters,
         );
 
-        for (final row in chunkRows.whereType<MapEntry<Campaign, ServiceDashboardCampaignSummary>>()) {
+        for (final summary in chunkSummaries.where(
+          (item) => item.spent > 0 || item.impressions > 0 || item.ots > 0,
+        )) {
+          final campaign = chunk.firstWhere(
+            (item) => int.tryParse(item.id) == summary.campaignId,
+            orElse: () => Campaign(
+              id: summary.campaignId.toString(),
+              name: summary.campaignName,
+              status: 'unknown',
+            ),
+          );
           final aggregate = aggregates.putIfAbsent(
             city.value,
             () => _CityAggregate(cityId: city.value, cityName: city.key),
           );
-          aggregate.add(row.key, row.value);
+          aggregate.add(campaign, summary);
         }
       }
     }

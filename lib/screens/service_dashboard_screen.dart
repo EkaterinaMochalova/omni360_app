@@ -166,7 +166,8 @@ class ServiceDashboardScreen extends ConsumerWidget {
                               }).toList(),
                             ),
                     ),
-                    if (state.query.operators.isNotEmpty) ...[
+                    if (state.query.operators.isNotEmpty &&
+                        operatorSummaries.isNotEmpty) ...[
                       const SizedBox(height: 12),
                       _SectionCard(
                         title: 'По подрядчикам',
@@ -183,7 +184,8 @@ class ServiceDashboardScreen extends ConsumerWidget {
                               ),
                       ),
                     ],
-                    if (state.query.cities.isNotEmpty) ...[
+                    if (state.query.cities.isNotEmpty &&
+                        citySummaries.isNotEmpty) ...[
                       const SizedBox(height: 12),
                       _SectionCard(
                         title: 'По городам',
