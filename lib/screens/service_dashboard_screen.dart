@@ -108,16 +108,16 @@ class ServiceDashboardScreen extends ConsumerWidget {
                           _KpiCard(
                             label: 'Бюджет общий (план)',
                             value: _money(totals.totalBudget),
-                            shareText: hasActiveFilters
-                                ? _shareText(
-                                    totals.totalBudget,
-                                    overallTotals.totalBudget,
-                                  )
-                                : null,
                           ),
                           _KpiCard(
                             label: 'Потрачено (факт)',
                             value: _money(totals.totalSpent),
+                            shareText: hasActiveFilters
+                                ? _shareText(
+                                    totals.totalSpent,
+                                    overallTotals.totalSpent,
+                                  )
+                                : null,
                           ),
                           _KpiCard(
                             label: 'Средняя ставка (факт)',
