@@ -503,8 +503,10 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
 
     final reqList = <String, dynamic>{
       'campaignIds': campaignIds,
-      'startDate': _formatApiDateTime(query.start),
-      'endDate': _formatApiDateTime(query.end),
+      'startDate': _formatApiIsoDateTime(query.start.toUtc()),
+      'endDate': _formatApiIsoDateTime(query.end.toUtc()),
+      'localStartDate': _formatApiIsoDateTime(query.start),
+      'localEndDate': _formatApiIsoDateTime(query.end),
       'displayOwnerIds': selectedOperatorIds,
       'cities': selectedCityIds,
       'formats': query.formats.toList(),
@@ -1010,33 +1012,24 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
 
   Future<ServiceDashboardFiltersData> _loadReferenceFilters() async {
     try {
-      final responses = await Future.wait([
-        _client.dio.get(
-          '/api/v1.0/clients/regions',
-          queryParameters: {'page': 0, 'size': 500},
-        ),
-        _client.dio.get(
-          '/api/v1.0/clients/display-owners/names',
-          queryParameters: {
-            'reqList': jsonEncode({'page': 0, 'size': 500}),
-          },
-        ),
-      ]);
+      final response = await _client.dio.get(
+        '/api/v1.0/clients/display-owners/names',
+        queryParameters: {
+          'reqList': jsonEncode({'page': 0, 'size': 500}),
+        },
+      );
 
-      final regionResponse = responses[0].data;
-      final operatorsResponse = responses[1].data;
-
-      final cities = _extractNamedItems(regionResponse);
+      final operatorsResponse = response.data;
       final operators = _extractNamedItems(operatorsResponse);
 
       return ServiceDashboardFiltersData(
         brands: const [],
         advertisers: const [],
         operators: operators,
-        cities: cities,
+        cities: const [],
         formats: const [],
         operatorIds: _extractNamedIdMap(operatorsResponse),
-        cityIds: _extractNamedIdMap(regionResponse),
+        cityIds: const {},
       );
     } catch (_) {
       return const ServiceDashboardFiltersData(
@@ -1121,7 +1114,6 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
 
     if (extraFilters != null) {
       operators.addAll(extraFilters.operators);
-      cities.addAll(extraFilters.cities);
     }
 
     List<String> sorted(Set<String> values) => values.toList()..sort();
@@ -1146,6 +1138,12 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
   static String _formatApiDateTime(DateTime value) {
     String pad(int n) => n.toString().padLeft(2, '0');
     return '${value.year}-${pad(value.month)}-${pad(value.day)} '
+        '${pad(value.hour)}:${pad(value.minute)}:${pad(value.second)}';
+  }
+
+  static String _formatApiIsoDateTime(DateTime value) {
+    String pad(int n) => n.toString().padLeft(2, '0');
+    return '${value.year}-${pad(value.month)}-${pad(value.day)}T'
         '${pad(value.hour)}:${pad(value.minute)}:${pad(value.second)}';
   }
 
