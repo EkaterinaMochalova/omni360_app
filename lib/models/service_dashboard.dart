@@ -327,22 +327,20 @@ class ServiceDashboardCampaignSummary {
 class ServiceDashboardTotals {
   final int campaignCount;
   final int activeCampaignCount;
-  final double totalBudget;
   final double totalSpent;
   final int totalImpressions;
   final int totalOts;
-  final double averageBid;
-  final double averageCpm;
+  final double avgCostPerExit;
+  final double avgOtsPerExit;
 
   const ServiceDashboardTotals({
     required this.campaignCount,
     required this.activeCampaignCount,
-    required this.totalBudget,
     required this.totalSpent,
     required this.totalImpressions,
     required this.totalOts,
-    required this.averageBid,
-    required this.averageCpm,
+    required this.avgCostPerExit,
+    required this.avgOtsPerExit,
   });
 }
 

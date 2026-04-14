@@ -101,20 +101,12 @@ class ServiceDashboardScreen extends ConsumerWidget {
                     _SectionCard(
                       title: 'KPI',
                       subtitle: hasActiveFilters
-                          ? 'Плановый бюджет показан по всем кампаниям. Факт и доли считаются по текущим фильтрам за выбранный период.'
+                          ? 'Факт рассчитан по выбранным фильтрам. Проценты показывают долю от всех кампаний за тот же период.'
                           : 'Агрегировано по ${filteredCampaigns.length} кампаниям за выбранный период',
                       child: Wrap(
                         spacing: 10,
                         runSpacing: 10,
                         children: [
-                          _KpiCard(
-                            label: 'Бюджет общий (план, все кампании)',
-                            value: _money(
-                              hasActiveFilters
-                                  ? overallTotals.totalBudget
-                                  : totals.totalBudget,
-                            ),
-                          ),
                           _KpiCard(
                             label: 'Потрачено (факт)',
                             value: _money(totals.totalSpent),
@@ -126,12 +118,12 @@ class ServiceDashboardScreen extends ConsumerWidget {
                                 : null,
                           ),
                           _KpiCard(
-                            label: 'Средняя ставка (факт)',
-                            value: _money(totals.averageBid),
+                            label: 'Средняя стоимость выхода',
+                            value: _money(totals.avgCostPerExit),
                           ),
                           _KpiCard(
-                            label: 'Средний CPM (факт)',
-                            value: _money(totals.averageCpm),
+                            label: 'Средний OTS на выход',
+                            value: totals.avgOtsPerExit.toStringAsFixed(2),
                           ),
                           _KpiCard(
                             label: 'Всего показов (факт)',
@@ -387,10 +379,6 @@ class ServiceDashboardScreen extends ConsumerWidget {
     List<Campaign> campaigns,
     List<ServiceDashboardCampaignSummary> summaries,
   ) {
-    final totalBudget = campaigns.fold<double>(
-      0,
-      (sum, campaign) => sum + (campaign.budget ?? 0),
-    );
     final totalSpent = summaries.fold<double>(
       0,
       (sum, item) => sum + item.spent,
@@ -400,11 +388,11 @@ class ServiceDashboardScreen extends ConsumerWidget {
       (sum, item) => sum + item.impressions,
     );
     final totalOts = summaries.fold<int>(0, (sum, item) => sum + item.ots);
-    final averageBid = totalImpressions > 0
+    final avgCostPerExit = totalImpressions > 0
         ? totalSpent / totalImpressions
         : 0.0;
-    final averageCpm = totalImpressions > 0
-        ? (totalSpent / totalImpressions) * 1000
+    final avgOtsPerExit = totalImpressions > 0
+        ? totalOts / totalImpressions
         : 0.0;
 
     return ServiceDashboardTotals(
@@ -412,12 +400,11 @@ class ServiceDashboardScreen extends ConsumerWidget {
       activeCampaignCount: campaigns
           .where((campaign) => campaign.isActive)
           .length,
-      totalBudget: totalBudget,
       totalSpent: totalSpent,
       totalImpressions: totalImpressions,
       totalOts: totalOts,
-      averageBid: averageBid,
-      averageCpm: averageCpm,
+      avgCostPerExit: avgCostPerExit,
+      avgOtsPerExit: avgOtsPerExit,
     );
   }
 
