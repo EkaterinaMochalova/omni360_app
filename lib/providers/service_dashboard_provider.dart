@@ -77,6 +77,25 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
   final Omni360Client _client;
   final Map<String, Campaign> _campaignDetailCache = {};
   final Map<String, Map<int, Map<String, dynamic>>> _campaignSegmentCache = {};
+  static const List<String> _fallbackFormats = <String>[
+    'BILLBOARD',
+    'SUPERSITE',
+    'SUPER_BOARD',
+    'CITY_FORMAT',
+    'CITY_BOARD',
+    'MEDIAFACADE',
+    'CITY_BOARD_7X4',
+    'CITY_BOARD_4x3',
+    'CITY_FORMAT_RC',
+    'CITY_FORMAT_WD',
+    'CITY_FORMAT_RD',
+    'PVZ_SCREEN',
+    'SKY_DIGITAL',
+    'METRO_LIGHTBOX',
+    'METRO_SCREEN_3X1',
+    'RW_PLATFORM',
+    'OTHER',
+  ];
 
   Future<void> _load() async {
     await _loadCampaigns();
@@ -922,6 +941,10 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
   }
 
   Future<ServiceDashboardFiltersData> _loadReferenceFilters() async {
+    dynamic operatorsResponse;
+    List<String> operators = const <String>[];
+    var operatorIds = const <String, int>{};
+
     try {
       final response = await _client.dio.get(
         '/api/v1.0/clients/display-owners/names',
@@ -929,30 +952,32 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
           'reqList': jsonEncode({'page': 0, 'size': 500}),
         },
       );
+      operatorsResponse = response.data;
+      operators = _extractNamedItems(operatorsResponse);
+      operatorIds = _extractNamedIdMap(operatorsResponse);
+    } catch (_) {}
 
-      final operatorsResponse = response.data;
-      final operators = _extractNamedItems(operatorsResponse);
-
-      return ServiceDashboardFiltersData(
-        brands: const [],
-        advertisers: const [],
-        operators: operators,
-        cities: const [],
-        formats: const [],
-        operatorIds: _extractNamedIdMap(operatorsResponse),
-        cityIds: const {},
+    var formats = <String>{};
+    try {
+      final formatsResponse = await _client.dio.get(
+        '/api/v1.0/clients/inventories/formats',
       );
-    } catch (_) {
-      return const ServiceDashboardFiltersData(
-        brands: [],
-        advertisers: [],
-        operators: [],
-        cities: [],
-        formats: [],
-        operatorIds: {},
-        cityIds: {},
-      );
+      formats.addAll(_extractNamedItems(formatsResponse.data));
+      formats.addAll(_extractStringItems(formatsResponse.data));
+    } catch (_) {}
+    if (formats.isEmpty) {
+      formats.addAll(_fallbackFormats);
     }
+
+    return ServiceDashboardFiltersData(
+      brands: const [],
+      advertisers: const [],
+      operators: operators,
+      cities: const [],
+      formats: formats.toList()..sort(),
+      operatorIds: operatorIds,
+      cityIds: const {},
+    );
   }
 
   static Map<String, int> _extractNamedIdMap(dynamic data) {
@@ -985,6 +1010,22 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
     return rawItems
         .whereType<Map<String, dynamic>>()
         .map((item) => item['name']?.toString() ?? '')
+        .where((name) => name.isNotEmpty)
+        .toSet()
+        .toList()
+      ..sort();
+  }
+
+  static List<String> _extractStringItems(dynamic data) {
+    final rawItems = switch (data) {
+      List<dynamic> _ => data,
+      {'content': List<dynamic> content} => content,
+      {'data': List<dynamic> items} => items,
+      _ => const <dynamic>[],
+    };
+
+    return rawItems
+        .map((item) => item?.toString() ?? '')
         .where((name) => name.isNotEmpty)
         .toSet()
         .toList()
@@ -1025,6 +1066,7 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
 
     if (extraFilters != null) {
       operators.addAll(extraFilters.operators);
+      formats.addAll(extraFilters.formats);
     }
 
     List<String> sorted(Set<String> values) => values.toList()..sort();
