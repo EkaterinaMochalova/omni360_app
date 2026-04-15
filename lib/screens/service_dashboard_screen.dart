@@ -447,10 +447,10 @@ class ServiceDashboardScreen extends ConsumerWidget {
   }
 
   static String _formatPercent(double percent) {
-    if (percent >= 10) return percent.toStringAsFixed(0);
-    if (percent >= 1) return percent.toStringAsFixed(1);
-    if (percent >= 0.1) return percent.toStringAsFixed(2);
-    return percent.toStringAsFixed(3);
+    if (percent >= 10) return '${percent.toStringAsFixed(0)}%';
+    if (percent >= 1) return '${percent.toStringAsFixed(1)}%';
+    if (percent >= 0.1) return '${percent.toStringAsFixed(2)}%';
+    return '${percent.toStringAsFixed(3)}%';
   }
 }
 
