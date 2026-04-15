@@ -481,9 +481,12 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
     ServiceDashboardQuery query,
     ServiceDashboardFiltersData filters,
   ) async {
+    if (query.formats.isNotEmpty) {
+      return _fetchFilteredInventoryFactChunk(campaigns, query, filters);
+    }
+
     if (query.operators.isNotEmpty ||
-        query.cities.isNotEmpty ||
-        query.formats.isNotEmpty) {
+        query.cities.isNotEmpty) {
       return _fetchFilteredCampaignStatsChunk(campaigns, query, filters);
     }
 
