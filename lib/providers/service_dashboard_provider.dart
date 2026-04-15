@@ -125,17 +125,18 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
         state.query,
         filters: state.filters,
       );
+      final overallQuery = state.query.copyWith(
+        campaignSearch: '',
+        brands: {},
+        advertisers: {},
+        operators: {},
+        cities: {},
+        formats: {},
+      );
       final overallSummaries = hasActiveFilters
-          ? await _fetchCampaignStats(
+          ? await _fetchFilteredCampaignStatsChunk(
               campaigns,
-              state.query.copyWith(
-                campaignSearch: '',
-                brands: {},
-                advertisers: {},
-                operators: {},
-                cities: {},
-                formats: {},
-              ),
+              overallQuery,
               state.filters,
             )
           : const <ServiceDashboardCampaignSummary>[];
