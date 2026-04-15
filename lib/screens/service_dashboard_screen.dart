@@ -203,6 +203,7 @@ class ServiceDashboardScreen extends ConsumerWidget {
     final operators = Set<String>.from(state.query.operators);
     final cities = Set<String>.from(state.query.cities);
     final formats = Set<String>.from(state.query.formats);
+    var operatorsSearch = '';
 
     showModalBottomSheet(
       context: context,
@@ -255,6 +256,13 @@ class ServiceDashboardScreen extends ConsumerWidget {
                     title: 'Операторы',
                     options: state.filters.operators,
                     selected: operators,
+                    searchable: true,
+                    searchQuery: operatorsSearch,
+                    searchHint: 'Поиск подрядчика',
+                    onSearchChanged: (value) {
+                      operatorsSearch = value;
+                      setModalState(() {});
+                    },
                     onChanged: () => setModalState(() {}),
                   ),
                   _MultiSelectSection(
@@ -761,18 +769,33 @@ class _MultiSelectSection extends StatelessWidget {
   final String title;
   final List<String> options;
   final Set<String> selected;
+  final bool searchable;
+  final String searchQuery;
+  final String? searchHint;
+  final ValueChanged<String>? onSearchChanged;
   final VoidCallback onChanged;
 
   const _MultiSelectSection({
     required this.title,
     required this.options,
     required this.selected,
+    this.searchable = false,
+    this.searchQuery = '',
+    this.searchHint,
+    this.onSearchChanged,
     required this.onChanged,
   });
 
   @override
   Widget build(BuildContext context) {
     if (options.isEmpty) return const SizedBox.shrink();
+    final normalizedQuery = searchQuery.trim().toLowerCase();
+    final visibleOptions = normalizedQuery.isEmpty
+        ? options
+        : options
+              .where((option) => option.toLowerCase().contains(normalizedQuery))
+              .toList();
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
       child: Column(
@@ -785,11 +808,33 @@ class _MultiSelectSection extends StatelessWidget {
               fontWeight: FontWeight.w600,
             ),
           ),
+          if (searchable) ...[
+            const SizedBox(height: 8),
+            TextField(
+              onChanged: onSearchChanged,
+              decoration: InputDecoration(
+                hintText: searchHint ?? 'Поиск',
+                prefixIcon: const Icon(Icons.search_rounded),
+                isDense: true,
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+                border: const OutlineInputBorder(),
+              ),
+            ),
+          ],
           const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: options.map((option) {
+          if (visibleOptions.isEmpty)
+            const Text(
+              'Ничего не найдено',
+              style: TextStyle(color: kTextSecondary, fontSize: 12),
+            )
+          else
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: visibleOptions.map((option) {
               final isSelected = selected.contains(option);
               return FilterChip(
                 selected: isSelected,
@@ -804,7 +849,7 @@ class _MultiSelectSection extends StatelessWidget {
                 },
               );
             }).toList(),
-          ),
+            ),
         ],
       ),
     );
