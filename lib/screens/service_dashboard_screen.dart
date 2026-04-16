@@ -727,8 +727,8 @@ class _CampaignSummaryRow extends StatelessWidget {
             runSpacing: 8,
             children: [
               _MiniStat(
-                label: 'Бюджет',
-                value: ServiceDashboardScreen._money(summary.budget),
+                label: 'Потрачено',
+                value: ServiceDashboardScreen._money(summary.spent),
               ),
               _MiniStat(
                 label: 'Показы',
