@@ -158,7 +158,7 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
         filters: state.filters,
       );
       final overallSummaries = hasActiveFilters
-          ? await _fetchFilteredCampaignStatsChunk(
+          ? await _fetchCampaignStats(
               overallCampaignsForPeriod,
               overallQuery,
               state.filters,
@@ -486,121 +486,8 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
     ServiceDashboardQuery query,
     ServiceDashboardFiltersData filters,
   ) async {
-    if (query.formats.isNotEmpty) {
-      return _fetchFilteredInventoryFactChunk(campaigns, query, filters);
-    }
-
-    if (query.operators.isNotEmpty ||
-        query.cities.isNotEmpty) {
-      return _fetchFilteredCampaignStatsChunk(campaigns, query, filters);
-    }
-
-    const chunkSize = 50;
-    final chunkFutures = <Future<List<ServiceDashboardCampaignSummary>>>[];
-
-    for (var i = 0; i < campaigns.length; i += chunkSize) {
-      final chunk = campaigns.skip(i).take(chunkSize).toList();
-      chunkFutures.add(_fetchProcessingFactChunk(chunk, query, filters));
-    }
-
-    final chunkResults = await Future.wait(chunkFutures);
-    return chunkResults.expand((items) => items).toList();
-  }
-
-  Future<List<ServiceDashboardCampaignSummary>> _fetchFilteredCampaignStatsChunk(
-    List<Campaign> campaigns,
-    ServiceDashboardQuery query,
-    ServiceDashboardFiltersData filters,
-  ) async {
-    const chunkSize = 50;
-    final futures = <Future<List<ServiceDashboardCampaignSummary>>>[];
-
-    for (var i = 0; i < campaigns.length; i += chunkSize) {
-      final chunk = campaigns.skip(i).take(chunkSize).toList();
-      futures.add(_fetchCampaignsStatsSlice(chunk, query, filters));
-    }
-
-    final results = await Future.wait(futures);
-    return results.expand((items) => items).toList();
-  }
-
-  Future<List<ServiceDashboardCampaignSummary>> _fetchCampaignsStatsSlice(
-    List<Campaign> campaigns,
-    ServiceDashboardQuery query,
-    ServiceDashboardFiltersData filters,
-  ) async {
-    final campaignIds = campaigns
-        .map((campaign) => int.tryParse(campaign.id))
-        .whereType<int>()
-        .toList();
-    if (campaignIds.isEmpty) return const [];
-
-    final selectedOperatorIds = query.operators
-        .map((name) => filters.operatorIds[name])
-        .whereType<int>()
-        .toList();
-    final selectedCityIds = query.cities
-        .map((name) => filters.cityIds[name])
-        .whereType<int>()
-        .toList();
-
-    final reqList = <String, dynamic>{
-      'campaignIds': campaignIds,
-      'startDate': _formatApiIsoDateTime(query.start.toUtc()),
-      'endDate': _formatApiIsoDateTime(query.end.toUtc()),
-      'localStartDate': _formatApiIsoDateTime(query.start),
-      'localEndDate': _formatApiIsoDateTime(query.end),
-      'displayOwnerIds': selectedOperatorIds,
-      'cities': selectedCityIds,
-      'formats': query.formats.toList(),
-      'states': const <String>[],
-      'creatives': const <int>[],
-      'creativeContents': const <int>[],
-      'customerIds': const <int>[],
-      'priceMode': 'CUSTOMER_CHARGE_INCLUDED',
-      'withPlatformFee': false,
-      'groupMode': 'DAILY',
-      'page': 0,
-      'size': campaigns.length * 40,
-    };
-
-    try {
-      final response = await _client.dio.get(
-        '/api/v1.0/clients/impressions/campaigns-stats',
-        queryParameters: {'reqList': jsonEncode(reqList)},
-      );
-      final data = response.data;
-      if (data is List) {
-        final byId = <int, List<Map<String, dynamic>>>{};
-        for (final item in data.whereType<Map<String, dynamic>>()) {
-          final campaignMap = item['campaign'] as Map<String, dynamic>?;
-          final id = (campaignMap?['id'] as num?)?.toInt();
-          if (id != null) {
-            byId.putIfAbsent(id, () => []).add(item);
-          }
-        }
-
-        if (byId.isNotEmpty) {
-          return campaigns.map((campaign) {
-            final id = int.tryParse(campaign.id);
-            final rows = id == null ? null : byId[id];
-            if (rows == null || rows.isEmpty) {
-              return ServiceDashboardCampaignSummary.fromCampaign(campaign);
-            }
-            return ServiceDashboardCampaignSummary.fromCampaignsStatsRows(
-              campaign,
-              rows,
-            );
-          }).toList();
-        }
-      }
-    } on DioException catch (e) {
-      // ignore: avoid_print
-      print(
-        '[service-dashboard campaigns-stats] status=${e.response?.statusCode} data=${e.response?.data}',
-      );
-    }
-
+    // Always use period-aware fact path to avoid campaign-lifetime totals
+    // leaking into selected dashboard date range.
     return _fetchFilteredInventoryFactChunk(campaigns, query, filters);
   }
 
@@ -619,90 +506,6 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
 
     final chunkResults = await Future.wait(chunkFutures);
     return chunkResults.expand((items) => items).toList();
-  }
-
-  Future<List<ServiceDashboardCampaignSummary>> _fetchProcessingFactChunk(
-    List<Campaign> campaigns,
-    ServiceDashboardQuery query,
-    ServiceDashboardFiltersData filters,
-  ) async {
-    final ids = campaigns.map((campaign) => int.tryParse(campaign.id)).whereType<int>().toList();
-    if (ids.isEmpty) return const [];
-
-    final request = <String, dynamic>{
-      'campaignIds': ids,
-      'startDate': _formatApiDateTime(query.start),
-      'endDate': _formatApiDateTime(query.end),
-      'priceMode': 'CUSTOMER_CHARGE_INCLUDED',
-      'withOts': true,
-      'page': 0,
-      'size': campaigns.length,
-    };
-
-    final variants = <Map<String, dynamic>>[
-      request,
-      {'request': jsonEncode(request)},
-    ];
-
-    for (final variant in variants) {
-      try {
-        final response = await _client.dio.get(
-          '/api/v1.0/clients/campaigns/processing-stats',
-          queryParameters: variant,
-          options: Options(listFormat: ListFormat.multi),
-        );
-        final data = response.data;
-        if (data is Map<String, dynamic>) {
-          final content =
-              (data['content'] as List? ?? const [])
-                  .whereType<Map<String, dynamic>>()
-                  .toList();
-          if (content.isNotEmpty) {
-            final byId = <int, Map<String, dynamic>>{};
-            for (final item in content) {
-              final campaignMap = item['campaign'] as Map<String, dynamic>?;
-              final id = (campaignMap?['id'] as num?)?.toInt();
-              if (id != null) byId[id] = item;
-            }
-            return campaigns
-                .map((campaign) {
-                  final id = int.tryParse(campaign.id);
-                  if (id == null) return ServiceDashboardCampaignSummary.fromCampaign(campaign);
-                  final item = byId[id];
-                  if (item == null) {
-                    return ServiceDashboardCampaignSummary.fromCampaign(campaign);
-                  }
-                  return ServiceDashboardCampaignSummary.fromProcessingStats(
-                    campaign,
-                    item,
-                  );
-                })
-                .toList();
-          }
-        }
-      } on DioException catch (e) {
-        // ignore: avoid_print
-        print(
-          '[service-dashboard processing-stats] status=${e.response?.statusCode} data=${e.response?.data}',
-        );
-      }
-    }
-
-    return _fetchImpressionFactChunk(campaigns, query, filters);
-  }
-
-  Future<List<ServiceDashboardCampaignSummary>> _fetchImpressionFactChunk(
-    List<Campaign> campaigns,
-    ServiceDashboardQuery query,
-    ServiceDashboardFiltersData filters,
-  ) async {
-    final summaries = await Future.wait(
-      campaigns.map(
-        (campaign) => _fetchImpressionFactForCampaign(campaign, query, filters),
-      ),
-    );
-
-    return summaries.whereType<ServiceDashboardCampaignSummary>().toList();
   }
 
   Future<List<ServiceDashboardCampaignSummary>> _fetchInventoryFactChunk(
@@ -1221,12 +1024,6 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
   static String _formatApiDateTime(DateTime value) {
     String pad(int n) => n.toString().padLeft(2, '0');
     return '${value.year}-${pad(value.month)}-${pad(value.day)} '
-        '${pad(value.hour)}:${pad(value.minute)}:${pad(value.second)}';
-  }
-
-  static String _formatApiIsoDateTime(DateTime value) {
-    String pad(int n) => n.toString().padLeft(2, '0');
-    return '${value.year}-${pad(value.month)}-${pad(value.day)}T'
         '${pad(value.hour)}:${pad(value.minute)}:${pad(value.second)}';
   }
 
