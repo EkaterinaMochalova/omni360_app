@@ -421,16 +421,31 @@ class ServiceDashboardScreen extends ConsumerWidget {
     if (query.campaignSearch.trim().isNotEmpty) {
       items.add('Кампании: ${query.campaignSearch.trim()}');
     }
-    if (query.brands.isNotEmpty) items.add('Бренды: ${query.brands.length}');
+    if (query.brands.isNotEmpty) {
+      items.add(_formatFilterValues('Бренды', query.brands));
+    }
     if (query.advertisers.isNotEmpty) {
-      items.add('Рекламодатели: ${query.advertisers.length}');
+      items.add(_formatFilterValues('Рекламодатели', query.advertisers));
     }
     if (query.operators.isNotEmpty) {
-      items.add('Операторы: ${query.operators.length}');
+      items.add(_formatFilterValues('Операторы', query.operators));
     }
-    if (query.cities.isNotEmpty) items.add('Города: ${query.cities.length}');
-    if (query.formats.isNotEmpty) items.add('Форматы: ${query.formats.length}');
+    if (query.cities.isNotEmpty) {
+      items.add(_formatFilterValues('Города', query.cities));
+    }
+    if (query.formats.isNotEmpty) {
+      items.add(_formatFilterValues('Форматы', query.formats));
+    }
     return items;
+  }
+
+  String _formatFilterValues(String label, Set<String> values) {
+    final sorted = values.toList()..sort();
+    const previewLimit = 2;
+    final preview = sorted.take(previewLimit).join(', ');
+    final rest = sorted.length - previewLimit;
+    final suffix = rest > 0 ? ' +$rest' : '';
+    return '$label: $preview$suffix';
   }
 
   static String _money(double value) => NumberFormat.currency(

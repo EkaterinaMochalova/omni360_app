@@ -152,9 +152,14 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
         cities: {},
         formats: {},
       );
+      final overallCampaignsForPeriod = filterCampaigns(
+        campaigns,
+        overallQuery,
+        filters: state.filters,
+      );
       final overallSummaries = hasActiveFilters
           ? await _fetchFilteredCampaignStatsChunk(
-              campaigns,
+              overallCampaignsForPeriod,
               overallQuery,
               state.filters,
             )
