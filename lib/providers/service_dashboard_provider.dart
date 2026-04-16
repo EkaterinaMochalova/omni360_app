@@ -486,19 +486,29 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
     ServiceDashboardQuery query,
     ServiceDashboardFiltersData filters,
   ) async {
-    final hasGranularFilters =
-        query.operators.isNotEmpty ||
-        query.cities.isNotEmpty ||
-        query.formats.isNotEmpty;
-
-    if (!hasGranularFilters) {
-      return _fetchImpressionStatsChunk(campaigns, query);
-    }
-
-    // For operator/city/format filters we need inventory-level period facts.
-    return _fetchFilteredInventoryFactChunk(campaigns, query, filters);
+    // Use impressions list for all dashboard facts: this endpoint is the only
+    // one that reliably respects the requested date range.
+    return _fetchImpressionsFactChunk(campaigns, query, filters);
   }
 
+  Future<List<ServiceDashboardCampaignSummary>> _fetchImpressionsFactChunk(
+    List<Campaign> campaigns,
+    ServiceDashboardQuery query,
+    ServiceDashboardFiltersData filters,
+  ) async {
+    const chunkSize = 8;
+    final chunkFutures = <Future<List<ServiceDashboardCampaignSummary>>>[];
+
+    for (var i = 0; i < campaigns.length; i += chunkSize) {
+      final chunk = campaigns.skip(i).take(chunkSize).toList();
+      chunkFutures.add(_fetchInventoryFactChunk(chunk, query, filters));
+    }
+
+    final chunkResults = await Future.wait(chunkFutures);
+    return chunkResults.expand((items) => items).toList();
+  }
+
+  // ignore: unused_element
   Future<List<ServiceDashboardCampaignSummary>> _fetchImpressionStatsChunk(
     List<Campaign> campaigns,
     ServiceDashboardQuery query,
@@ -607,6 +617,7 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
     );
   }
 
+  // ignore: unused_element
   Future<List<ServiceDashboardCampaignSummary>> _fetchFilteredInventoryFactChunk(
     List<Campaign> campaigns,
     ServiceDashboardQuery query,
@@ -643,32 +654,10 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
     ServiceDashboardQuery query,
     ServiceDashboardFiltersData filters,
   ) async {
-    final campaignId = int.tryParse(campaign.id);
-    if (campaignId == null) return null;
-
-    final selectedOperatorIds = query.operators
-        .map((name) => filters.operatorIds[name])
-        .whereType<int>()
-        .toList();
-    final selectedCityIds = query.cities
-        .map((name) => filters.cityIds[name])
-        .whereType<int>()
-        .toList();
-
-    final rows = await _fetchInventoryStatsRows(
-      campaignId: campaignId,
-      query: query,
-      selectedOperatorIds: selectedOperatorIds,
-      selectedCityIds: selectedCityIds,
-    );
-
-    if (rows == null || rows.isEmpty) {
-      return _fetchImpressionFactForCampaign(campaign, query, filters);
-    }
-
-    return ServiceDashboardCampaignSummary.fromInventoryStats(campaign, rows);
+    return _fetchImpressionFactForCampaign(campaign, query, filters);
   }
 
+  // ignore: unused_element
   Future<List<Map<String, dynamic>>?> _fetchInventoryStatsRows({
     required int campaignId,
     required ServiceDashboardQuery query,
@@ -1139,7 +1128,7 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
 
   static String _formatApiDateTime(DateTime value) {
     String pad(int n) => n.toString().padLeft(2, '0');
-    return '${value.year}-${pad(value.month)}-${pad(value.day)} '
+    return '${value.year}-${pad(value.month)}-${pad(value.day)}T'
         '${pad(value.hour)}:${pad(value.minute)}:${pad(value.second)}';
   }
 
