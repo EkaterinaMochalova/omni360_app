@@ -881,6 +881,11 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
         .toSet();
 
     return campaigns.where((campaign) {
+      final matchesPeriod = _campaignIntersectsRange(
+        campaign,
+        query.start,
+        query.end,
+      );
       final matchesSearch =
           search.isEmpty || campaign.name.toLowerCase().contains(search);
       final matchesBrand =
@@ -904,12 +909,49 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
           query.formats.isEmpty || campaign.formats.any(query.formats.contains);
 
       return matchesSearch &&
+          matchesPeriod &&
           matchesBrand &&
           matchesAdvertiser &&
           matchesOperator &&
           matchesCity &&
           matchesFormat;
     }).toList();
+  }
+
+  static bool _campaignIntersectsRange(
+    Campaign campaign,
+    DateTime queryStart,
+    DateTime queryEnd,
+  ) {
+    final campaignStart = _parseCampaignBoundary(campaign.startDate);
+    final campaignEndDateOnly = _parseCampaignBoundary(campaign.endDate);
+    final campaignEnd = campaignEndDateOnly == null
+        ? null
+        : DateTime(
+            campaignEndDateOnly.year,
+            campaignEndDateOnly.month,
+            campaignEndDateOnly.day,
+            23,
+            59,
+            59,
+          );
+
+    if (campaignStart == null && campaignEnd == null) {
+      return true;
+    }
+    if (campaignEnd != null && campaignEnd.isBefore(queryStart)) {
+      return false;
+    }
+    if (campaignStart != null && campaignStart.isAfter(queryEnd)) {
+      return false;
+    }
+    return true;
+  }
+
+  static DateTime? _parseCampaignBoundary(String? raw) {
+    if (raw == null || raw.trim().isEmpty) return null;
+    final normalized = raw.trim().replaceFirst(' ', 'T');
+    return DateTime.tryParse(normalized);
   }
 
   static bool _matchesSelectedCities(
