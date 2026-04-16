@@ -486,9 +486,106 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
     ServiceDashboardQuery query,
     ServiceDashboardFiltersData filters,
   ) async {
-    // Always use period-aware fact path to avoid campaign-lifetime totals
-    // leaking into selected dashboard date range.
+    final hasGranularFilters =
+        query.operators.isNotEmpty ||
+        query.cities.isNotEmpty ||
+        query.formats.isNotEmpty;
+
+    if (!hasGranularFilters) {
+      return _fetchImpressionStatsChunk(campaigns, query);
+    }
+
+    // For operator/city/format filters we need inventory-level period facts.
     return _fetchFilteredInventoryFactChunk(campaigns, query, filters);
+  }
+
+  Future<List<ServiceDashboardCampaignSummary>> _fetchImpressionStatsChunk(
+    List<Campaign> campaigns,
+    ServiceDashboardQuery query,
+  ) async {
+    const chunkSize = 16;
+    final futures = <Future<List<ServiceDashboardCampaignSummary>>>[];
+
+    for (var i = 0; i < campaigns.length; i += chunkSize) {
+      final chunk = campaigns.skip(i).take(chunkSize).toList();
+      futures.add(_fetchImpressionStatsSlice(chunk, query));
+    }
+
+    final results = await Future.wait(futures);
+    return results.expand((items) => items).toList();
+  }
+
+  Future<List<ServiceDashboardCampaignSummary>> _fetchImpressionStatsSlice(
+    List<Campaign> campaigns,
+    ServiceDashboardQuery query,
+  ) async {
+    final summaries = await Future.wait(
+      campaigns.map((campaign) => _fetchImpressionStatsForCampaign(campaign, query)),
+    );
+    return summaries.whereType<ServiceDashboardCampaignSummary>().toList();
+  }
+
+  Future<ServiceDashboardCampaignSummary?> _fetchImpressionStatsForCampaign(
+    Campaign campaign,
+    ServiceDashboardQuery query,
+  ) async {
+    final campaignId = int.tryParse(campaign.id);
+    if (campaignId == null) return null;
+
+    final variants = <Map<String, dynamic>>[
+      {
+        'reqList': jsonEncode({
+          'startDate': _formatApiDateTime(query.start),
+          'endDate': _formatApiDateTime(query.end),
+          'localStartDate': _formatApiDateTime(query.start),
+          'localEndDate': _formatApiDateTime(query.end),
+        }),
+      },
+      {
+        'reqList': jsonEncode({
+          'startDate': _formatApiDateTime(query.start.toUtc()),
+          'endDate': _formatApiDateTime(query.end.toUtc()),
+        }),
+      },
+      {
+        'reqList': jsonEncode({
+          'startDate': _formatApiDateTime(query.start),
+          'endDate': _formatApiDateTime(query.end),
+        }),
+      },
+    ];
+
+    DioException? lastError;
+    for (final variant in variants) {
+      try {
+        final response = await _client.dio.get(
+          '/api/v1.0/clients/campaigns/$campaignId/impression-stats',
+          queryParameters: variant,
+          options: Options(listFormat: ListFormat.multi),
+        );
+        final data = response.data;
+        if (data is Map<String, dynamic>) {
+          final stats = CampaignStats.fromImpressionStats(data);
+          return ServiceDashboardCampaignSummary.fromCampaignStats(
+            campaign,
+            stats,
+          );
+        }
+      } on DioException catch (e) {
+        lastError = e;
+      }
+    }
+
+    if (lastError != null) {
+      // ignore: avoid_print
+      print(
+        '[service-dashboard impression-stats] campaign=$campaignId status=${lastError.response?.statusCode} data=${lastError.response?.data}',
+      );
+    }
+    return ServiceDashboardCampaignSummary.fromCampaignStats(
+      campaign,
+      CampaignStats.empty(),
+    );
   }
 
   Future<List<ServiceDashboardCampaignSummary>> _fetchFilteredInventoryFactChunk(
