@@ -816,30 +816,110 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
     final campaignId = int.tryParse(campaign.id);
     if (campaignId == null) return null;
 
-    try {
-      final response = await _client.dio.get(
-        '/api/v1.0/clients/campaigns/$campaignId/impression-stats',
-        queryParameters: {'reqList': '{}'},
-        options: Options(listFormat: ListFormat.multi),
-      );
-      final data = response.data;
-      if (data is Map<String, dynamic>) {
-        final stats = CampaignStats.fromImpressionStats(data);
-        if (stats.hasData || stats.planBudget > 0) {
-          return ServiceDashboardCampaignSummary.fromCampaignStats(
-            campaign,
-            stats,
+    final selectedOperatorIds = query.operators
+        .map((name) => filters.operatorIds[name])
+        .whereType<int>()
+        .toList();
+    final selectedCityIds = query.cities
+        .map((name) => filters.cityIds[name])
+        .whereType<int>()
+        .toList();
+
+    final rows = await _fetchImpressionsRows(
+      campaignId: campaignId,
+      query: query,
+      selectedOperatorIds: selectedOperatorIds,
+      selectedCityIds: selectedCityIds,
+    );
+    if (rows != null) {
+      return ServiceDashboardCampaignSummary.fromImpressions(campaign, rows);
+    }
+
+    return ServiceDashboardCampaignSummary.fromImpressions(
+      campaign,
+      const [],
+    );
+  }
+
+  Future<List<Map<String, dynamic>>?> _fetchImpressionsRows({
+    required int campaignId,
+    required ServiceDashboardQuery query,
+    required List<int> selectedOperatorIds,
+    required List<int> selectedCityIds,
+  }) async {
+    const pageSize = 500;
+    const maxPages = 40;
+    final variants = <Map<String, dynamic>>[
+      {
+        'page': 0,
+        'size': pageSize,
+        'localStartDate': _formatApiDateTime(query.start),
+        'localEndDate': _formatApiDateTime(query.end),
+        if (selectedOperatorIds.isNotEmpty) 'displayOwnerIds': selectedOperatorIds,
+        if (selectedCityIds.isNotEmpty) 'cities': selectedCityIds,
+        if (query.formats.isNotEmpty) 'formats': query.formats.toList(),
+        'withPlatformFee': false,
+      },
+      {
+        'page': 0,
+        'size': pageSize,
+        'startDate': _formatApiDateTime(query.start.toUtc()),
+        'endDate': _formatApiDateTime(query.end.toUtc()),
+        if (selectedOperatorIds.isNotEmpty) 'displayOwnerIds': selectedOperatorIds,
+        if (selectedCityIds.isNotEmpty) 'cities': selectedCityIds,
+        if (query.formats.isNotEmpty) 'formats': query.formats.toList(),
+        'withPlatformFee': false,
+      },
+    ];
+
+    DioException? lastError;
+    for (final baseVariant in variants) {
+      final collected = <Map<String, dynamic>>[];
+      for (var page = 0; page < maxPages; page++) {
+        try {
+          final queryParameters = <String, dynamic>{
+            ...baseVariant,
+            'page': page,
+          };
+          final response = await _client.dio.get(
+            '/api/v1.0/clients/campaigns/$campaignId/impressions',
+            queryParameters: queryParameters,
+            options: Options(listFormat: ListFormat.multi),
           );
+          final data = response.data;
+          if (data is! Map<String, dynamic>) {
+            break;
+          }
+          final content =
+              (data['content'] as List? ?? const [])
+                  .whereType<Map<String, dynamic>>()
+                  .toList();
+          if (content.isEmpty) {
+            break;
+          }
+          collected.addAll(content);
+
+          final isLast = data['last'] == true;
+          if (isLast || content.length < pageSize) {
+            break;
+          }
+        } on DioException catch (e) {
+          lastError = e;
+          break;
         }
       }
-      return ServiceDashboardCampaignSummary.fromCampaign(campaign);
-    } on DioException catch (e) {
+      if (collected.isNotEmpty) {
+        return collected;
+      }
+    }
+
+    if (lastError != null) {
       // ignore: avoid_print
       print(
-        '[service-dashboard impression-stats] campaign=$campaignId status=${e.response?.statusCode} data=${e.response?.data}',
+        '[service-dashboard impressions-list] campaign=$campaignId status=${lastError.response?.statusCode} data=${lastError.response?.data}',
       );
-      return ServiceDashboardCampaignSummary.fromCampaign(campaign);
     }
+    return null;
   }
 
   Future<void> setRange(DateTime start, DateTime end) async {
