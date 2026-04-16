@@ -533,6 +533,25 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
     if (campaignId == null) return null;
 
     final variants = <Map<String, dynamic>>[
+      // OpenAPI shows reqList as an object query param, so try structured forms first.
+      {
+        'reqList.startDate': _formatApiDateTime(query.start),
+        'reqList.endDate': _formatApiDateTime(query.end),
+        'reqList.localStartDate': _formatApiDateTime(query.start),
+        'reqList.localEndDate': _formatApiDateTime(query.end),
+      },
+      {
+        'reqList[startDate]': _formatApiDateTime(query.start),
+        'reqList[endDate]': _formatApiDateTime(query.end),
+        'reqList[localStartDate]': _formatApiDateTime(query.start),
+        'reqList[localEndDate]': _formatApiDateTime(query.end),
+      },
+      {
+        'startDate': _formatApiDateTime(query.start),
+        'endDate': _formatApiDateTime(query.end),
+        'localStartDate': _formatApiDateTime(query.start),
+        'localEndDate': _formatApiDateTime(query.end),
+      },
       {
         'reqList': jsonEncode({
           'startDate': _formatApiDateTime(query.start),
