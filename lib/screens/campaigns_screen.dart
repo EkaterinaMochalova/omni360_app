@@ -882,31 +882,34 @@ class _CampaignCard extends ConsumerWidget {
     );
     final c = campaign;
 
+    final cardStats = (c.isActive || c.spent == null)
+        ? ref.watch(campaignStatsProvider(c.id)).whenOrNull(data: (s) => s)
+        : null;
+    final effectiveSpent = (c.spent != null && c.spent! > 0)
+        ? c.spent
+        : (cardStats != null && cardStats.factBudget > 0
+              ? cardStats.factBudget
+              : null);
+
     final (statusBg, statusFg) = _statusColors(c.status);
-    final ratio = (c.spent != null && c.budget != null && c.budget! > 0)
-        ? (c.spent! / c.budget!).clamp(0.0, 1.0)
+    final ratio = (effectiveSpent != null && c.budget != null && c.budget! > 0)
+        ? (effectiveSpent / c.budget!).clamp(0.0, 1.0)
         : null;
 
     // Алерты — загружаем stats только для активных кампаний
-    final alertDots = c.isActive
-        ? ref
-              .watch(campaignStatsProvider(c.id))
-              .whenOrNull(
-                data: (stats) {
-                  final alerts = buildAlerts(c, stats);
-                  if (alerts.isEmpty) return null;
-                  final hasOver = alerts.any((a) => a.type == PaceType.over);
-                  final hasNoExits = alerts.any(
-                    (a) => a.type == PaceType.noExits,
-                  );
-                  final hasUnder = alerts.any((a) => a.type == PaceType.under);
-                  return (
-                    hasOver: hasOver,
-                    hasNoExits: hasNoExits,
-                    hasUnder: hasUnder,
-                  );
-                },
-              )
+    final alertDots = c.isActive && cardStats != null
+        ? () {
+            final alerts = buildAlerts(c, cardStats);
+            if (alerts.isEmpty) return null;
+            final hasOver = alerts.any((a) => a.type == PaceType.over);
+            final hasNoExits = alerts.any((a) => a.type == PaceType.noExits);
+            final hasUnder = alerts.any((a) => a.type == PaceType.under);
+            return (
+              hasOver: hasOver,
+              hasNoExits: hasNoExits,
+              hasUnder: hasUnder,
+            );
+          }()
         : null;
 
     return GestureDetector(
@@ -1030,13 +1033,13 @@ class _CampaignCard extends ConsumerWidget {
               ],
             ),
 
-            if (c.spent != null || c.budget != null) ...[
+            if (effectiveSpent != null || c.budget != null) ...[
               const SizedBox(height: 8),
               Row(
                 children: [
                   Expanded(
                     child: Text(
-                      'Потрачено: ${c.spent != null ? fmt.format(c.spent) : '—'}',
+                      'Потрачено: ${effectiveSpent != null ? fmt.format(effectiveSpent) : '—'}',
                       style: const TextStyle(
                         color: kTextSecondary,
                         fontSize: 12,
@@ -1046,7 +1049,7 @@ class _CampaignCard extends ConsumerWidget {
                   ),
                   Expanded(
                     child: Text(
-                      'Осталось: ${c.budget != null ? fmt.format(((c.budget ?? 0) - (c.spent ?? 0)).clamp(0.0, double.infinity)) : '—'}',
+                      'Осталось: ${c.budget != null ? fmt.format(((c.budget ?? 0) - (effectiveSpent ?? 0)).clamp(0.0, double.infinity)) : '—'}',
                       textAlign: TextAlign.right,
                       style: const TextStyle(
                         color: kTextSecondary,
@@ -1082,7 +1085,7 @@ class _CampaignCard extends ConsumerWidget {
                     style: const TextStyle(color: kTextSecondary, fontSize: 11),
                   ),
                   Text(
-                    fmt.format(c.spent),
+                    fmt.format(effectiveSpent),
                     style: const TextStyle(color: kTextSecondary, fontSize: 11),
                   ),
                 ],
