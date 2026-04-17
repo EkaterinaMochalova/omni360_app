@@ -66,8 +66,6 @@ class _CampaignsScreenState extends ConsumerState<CampaignsScreen> {
   static const _filters = [
     'Все',
     'Активна',
-    'На паузе',
-    'Не в графике',
     'Новая',
     'Завершена',
     'Бюджет исчерпан',
