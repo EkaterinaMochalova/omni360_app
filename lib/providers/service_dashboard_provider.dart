@@ -77,6 +77,8 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
   final Omni360Client _client;
   final Map<String, Campaign> _campaignDetailCache = {};
   final Map<String, Map<int, Map<String, dynamic>>> _campaignSegmentCache = {};
+  final Map<String, _DashboardFactCacheEntry> _factCache = {};
+  static const Duration _factCacheTtl = Duration(minutes: 10);
   static const List<String> _fallbackFormats = <String>[
     'BILLBOARD',
     'SUPERSITE',
@@ -157,14 +159,15 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
         overallQuery,
         filters: state.filters,
       );
-      final overallSummaries = hasActiveFilters
-          ? await _fetchCampaignStats(
+      final overallFuture = hasActiveFilters
+          ? _fetchCampaignStats(
               overallCampaignsForPeriod,
               overallQuery,
               state.filters,
             )
-          : const <ServiceDashboardCampaignSummary>[];
+          : Future.value(const <ServiceDashboardCampaignSummary>[]);
       if (filteredCampaigns.isEmpty) {
+        final overallSummaries = await overallFuture;
         state = state.copyWith(
           summaries: const AsyncValue.data([]),
           overallSummaries: AsyncValue.data(overallSummaries),
@@ -178,9 +181,15 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
         filteredCampaigns,
         state.query,
         state.filters,
+        onProgress: (partial) {
+          state = state.copyWith(
+            summaries: AsyncValue.data(_sortSummaries(partial)),
+          );
+        },
       );
+      final overallSummaries = await overallFuture;
       state = state.copyWith(
-        summaries: AsyncValue.data(summaries),
+        summaries: AsyncValue.data(_sortSummaries(summaries)),
         overallSummaries: AsyncValue.data(overallSummaries),
         operatorSummaries: const AsyncValue.data([]),
         citySummaries: const AsyncValue.data([]),
@@ -206,9 +215,7 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
       filters: state.filters,
     );
     final missingDetails = candidates
-        .where(
-          (campaign) => _needsDetailEnrichmentForFilters(campaign, query),
-        )
+        .where((campaign) => _needsDetailEnrichmentForFilters(campaign, query))
         .toList();
 
     if (missingDetails.isEmpty) {
@@ -329,8 +336,8 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
         final displayOwnerId =
             (data['displayOwnerId'] as num?)?.toInt() ??
             ((data['displayOwner'] as Map?)?['id'] as num?)?.toInt();
-        final displayOwnerName =
-            (data['displayOwner'] as Map?)?['name']?.toString();
+        final displayOwnerName = (data['displayOwner'] as Map?)?['name']
+            ?.toString();
         if (displayOwnerId != null) {
           enrichedOperatorIds.add(displayOwnerId);
         }
@@ -412,8 +419,8 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
       final segmentOperatorId =
           (data['displayOwnerId'] as num?)?.toInt() ??
           ((data['displayOwner'] as Map?)?['id'] as num?)?.toInt();
-      final segmentOperatorName =
-          (data['displayOwner'] as Map?)?['name']?.toString();
+      final segmentOperatorName = (data['displayOwner'] as Map?)?['name']
+          ?.toString();
 
       final matchesOperator =
           query.operators.isEmpty ||
@@ -446,14 +453,19 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
           return true;
         }
         if (regionName != null &&
-            _regionCodesForCity(regionName).any(campaign.regionCodes.contains)) {
+            _regionCodesForCity(
+              regionName,
+            ).any(campaign.regionCodes.contains)) {
           return true;
         }
         return false;
       }
 
-      final matchingInventories = inventories.where(inventoryMatchesCity).toList();
-      final matchesCity = query.cities.isEmpty || matchingInventories.isNotEmpty;
+      final matchingInventories = inventories
+          .where(inventoryMatchesCity)
+          .toList();
+      final matchesCity =
+          query.cities.isEmpty || matchingInventories.isNotEmpty;
       if (!matchesCity) {
         continue;
       }
@@ -484,28 +496,36 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
   Future<List<ServiceDashboardCampaignSummary>> _fetchCampaignStats(
     List<Campaign> campaigns,
     ServiceDashboardQuery query,
-    ServiceDashboardFiltersData filters,
-  ) async {
+    ServiceDashboardFiltersData filters, {
+    void Function(List<ServiceDashboardCampaignSummary> partial)? onProgress,
+  }) async {
     // Use impressions list for all dashboard facts: this endpoint is the only
     // one that reliably respects the requested date range.
-    return _fetchImpressionsFactChunk(campaigns, query, filters);
+    return _fetchImpressionsFactChunk(
+      campaigns,
+      query,
+      filters,
+      onProgress: onProgress,
+    );
   }
 
   Future<List<ServiceDashboardCampaignSummary>> _fetchImpressionsFactChunk(
     List<Campaign> campaigns,
     ServiceDashboardQuery query,
-    ServiceDashboardFiltersData filters,
-  ) async {
-    const chunkSize = 8;
-    final chunkFutures = <Future<List<ServiceDashboardCampaignSummary>>>[];
+    ServiceDashboardFiltersData filters, {
+    void Function(List<ServiceDashboardCampaignSummary> partial)? onProgress,
+  }) async {
+    const chunkSize = 4;
+    final aggregated = <ServiceDashboardCampaignSummary>[];
 
     for (var i = 0; i < campaigns.length; i += chunkSize) {
       final chunk = campaigns.skip(i).take(chunkSize).toList();
-      chunkFutures.add(_fetchInventoryFactChunk(chunk, query, filters));
+      final chunkResult = await _fetchInventoryFactChunk(chunk, query, filters);
+      aggregated.addAll(chunkResult);
+      onProgress?.call(List.unmodifiable(aggregated));
     }
 
-    final chunkResults = await Future.wait(chunkFutures);
-    return chunkResults.expand((items) => items).toList();
+    return aggregated;
   }
 
   // ignore: unused_element
@@ -530,7 +550,9 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
     ServiceDashboardQuery query,
   ) async {
     final summaries = await Future.wait(
-      campaigns.map((campaign) => _fetchImpressionStatsForCampaign(campaign, query)),
+      campaigns.map(
+        (campaign) => _fetchImpressionStatsForCampaign(campaign, query),
+      ),
     );
     return summaries.whereType<ServiceDashboardCampaignSummary>().toList();
   }
@@ -617,24 +639,6 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
     );
   }
 
-  // ignore: unused_element
-  Future<List<ServiceDashboardCampaignSummary>> _fetchFilteredInventoryFactChunk(
-    List<Campaign> campaigns,
-    ServiceDashboardQuery query,
-    ServiceDashboardFiltersData filters,
-  ) async {
-    const chunkSize = 8;
-    final chunkFutures = <Future<List<ServiceDashboardCampaignSummary>>>[];
-
-    for (var i = 0; i < campaigns.length; i += chunkSize) {
-      final chunk = campaigns.skip(i).take(chunkSize).toList();
-      chunkFutures.add(_fetchInventoryFactChunk(chunk, query, filters));
-    }
-
-    final chunkResults = await Future.wait(chunkFutures);
-    return chunkResults.expand((items) => items).toList();
-  }
-
   Future<List<ServiceDashboardCampaignSummary>> _fetchInventoryFactChunk(
     List<Campaign> campaigns,
     ServiceDashboardQuery query,
@@ -654,7 +658,55 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
     ServiceDashboardQuery query,
     ServiceDashboardFiltersData filters,
   ) async {
-    return _fetchImpressionFactForCampaign(campaign, query, filters);
+    final cacheKey = _buildFactCacheKey(campaign, query, filters);
+    final cached = _factCache[cacheKey];
+    if (cached != null &&
+        DateTime.now().difference(cached.createdAt) <= _factCacheTtl) {
+      return cached.summary;
+    }
+
+    final summary = await _fetchImpressionFactForCampaign(
+      campaign,
+      query,
+      filters,
+    );
+    if (summary != null) {
+      _factCache[cacheKey] = _DashboardFactCacheEntry(
+        createdAt: DateTime.now(),
+        summary: summary,
+      );
+    }
+    return summary;
+  }
+
+  String _buildFactCacheKey(
+    Campaign campaign,
+    ServiceDashboardQuery query,
+    ServiceDashboardFiltersData filters,
+  ) {
+    final campaignId = int.tryParse(campaign.id) ?? 0;
+    final operatorIds =
+        query.operators
+            .map((name) => filters.operatorIds[name])
+            .whereType<int>()
+            .toList()
+          ..sort();
+    final cityIds =
+        query.cities
+            .map((name) => filters.cityIds[name])
+            .whereType<int>()
+            .toList()
+          ..sort();
+    final formats = query.formats.toList()..sort();
+
+    return [
+      campaignId,
+      _formatApiDateTime(query.start),
+      _formatApiDateTime(query.end),
+      operatorIds.join(','),
+      cityIds.join(','),
+      formats.join(','),
+    ].join('|');
   }
 
   // ignore: unused_element
@@ -670,7 +722,8 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
         'size': 500,
         'localStartDate': _formatApiDateTime(query.start),
         'localEndDate': _formatApiDateTime(query.end),
-        if (selectedOperatorIds.isNotEmpty) 'displayOwnerIds': selectedOperatorIds,
+        if (selectedOperatorIds.isNotEmpty)
+          'displayOwnerIds': selectedOperatorIds,
         if (selectedCityIds.isNotEmpty) 'cities': selectedCityIds,
         if (query.formats.isNotEmpty) 'formats': query.formats.toList(),
         'withPlatformFee': false,
@@ -680,7 +733,8 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
         'size': 500,
         'startDate': _formatApiDateTime(query.start.toUtc()),
         'endDate': _formatApiDateTime(query.end.toUtc()),
-        if (selectedOperatorIds.isNotEmpty) 'displayOwnerIds': selectedOperatorIds,
+        if (selectedOperatorIds.isNotEmpty)
+          'displayOwnerIds': selectedOperatorIds,
         if (selectedCityIds.isNotEmpty) 'cities': selectedCityIds,
         if (query.formats.isNotEmpty) 'formats': query.formats.toList(),
         'withPlatformFee': false,
@@ -743,10 +797,7 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
       return ServiceDashboardCampaignSummary.fromImpressions(campaign, rows);
     }
 
-    return ServiceDashboardCampaignSummary.fromImpressions(
-      campaign,
-      const [],
-    );
+    return ServiceDashboardCampaignSummary.fromImpressions(campaign, const []);
   }
 
   Future<List<Map<String, dynamic>>?> _fetchImpressionsRows({
@@ -763,7 +814,8 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
         'size': pageSize,
         'localStartDate': _formatApiDateTime(query.start),
         'localEndDate': _formatApiDateTime(query.end),
-        if (selectedOperatorIds.isNotEmpty) 'displayOwnerIds': selectedOperatorIds,
+        if (selectedOperatorIds.isNotEmpty)
+          'displayOwnerIds': selectedOperatorIds,
         if (selectedCityIds.isNotEmpty) 'cities': selectedCityIds,
         if (query.formats.isNotEmpty) 'formats': query.formats.toList(),
         'withPlatformFee': false,
@@ -773,7 +825,8 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
         'size': pageSize,
         'startDate': _formatApiDateTime(query.start.toUtc()),
         'endDate': _formatApiDateTime(query.end.toUtc()),
-        if (selectedOperatorIds.isNotEmpty) 'displayOwnerIds': selectedOperatorIds,
+        if (selectedOperatorIds.isNotEmpty)
+          'displayOwnerIds': selectedOperatorIds,
         if (selectedCityIds.isNotEmpty) 'cities': selectedCityIds,
         if (query.formats.isNotEmpty) 'formats': query.formats.toList(),
         'withPlatformFee': false,
@@ -798,10 +851,9 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
           if (data is! Map<String, dynamic>) {
             break;
           }
-          final content =
-              (data['content'] as List? ?? const [])
-                  .whereType<Map<String, dynamic>>()
-                  .toList();
+          final content = (data['content'] as List? ?? const [])
+              .whereType<Map<String, dynamic>>()
+              .toList();
           if (content.isEmpty) {
             break;
           }
@@ -1165,6 +1217,24 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
         query.cities.isNotEmpty ||
         query.formats.isNotEmpty;
   }
+
+  static List<ServiceDashboardCampaignSummary> _sortSummaries(
+    List<ServiceDashboardCampaignSummary> summaries,
+  ) {
+    final copy = [...summaries];
+    copy.sort((a, b) => b.spent.compareTo(a.spent));
+    return copy;
+  }
+}
+
+class _DashboardFactCacheEntry {
+  final DateTime createdAt;
+  final ServiceDashboardCampaignSummary summary;
+
+  const _DashboardFactCacheEntry({
+    required this.createdAt,
+    required this.summary,
+  });
 }
 
 final serviceDashboardProvider =
