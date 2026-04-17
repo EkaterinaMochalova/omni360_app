@@ -807,7 +807,7 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
     required List<int> selectedCityIds,
   }) async {
     const pageSize = 500;
-    const maxPages = 40;
+    const maxPages = 8;
     final variants = <Map<String, dynamic>>[
       {
         'page': 0,
@@ -818,18 +818,6 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
           'displayOwnerIds': selectedOperatorIds,
         if (selectedCityIds.isNotEmpty) 'cities': selectedCityIds,
         if (query.formats.isNotEmpty) 'formats': query.formats.toList(),
-        'withPlatformFee': false,
-      },
-      {
-        'page': 0,
-        'size': pageSize,
-        'startDate': _formatApiDateTime(query.start.toUtc()),
-        'endDate': _formatApiDateTime(query.end.toUtc()),
-        if (selectedOperatorIds.isNotEmpty)
-          'displayOwnerIds': selectedOperatorIds,
-        if (selectedCityIds.isNotEmpty) 'cities': selectedCityIds,
-        if (query.formats.isNotEmpty) 'formats': query.formats.toList(),
-        'withPlatformFee': false,
       },
     ];
 
@@ -837,35 +825,50 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
     for (final baseVariant in variants) {
       final collected = <Map<String, dynamic>>[];
       for (var page = 0; page < maxPages; page++) {
-        try {
-          final queryParameters = <String, dynamic>{
-            ...baseVariant,
-            'page': page,
-          };
-          final response = await _client.dio.get(
-            '/api/v1.0/clients/campaigns/$campaignId/impressions',
-            queryParameters: queryParameters,
-            options: Options(listFormat: ListFormat.multi),
-          );
-          final data = response.data;
-          if (data is! Map<String, dynamic>) {
-            break;
-          }
-          final content = (data['content'] as List? ?? const [])
-              .whereType<Map<String, dynamic>>()
-              .toList();
-          if (content.isEmpty) {
-            break;
-          }
-          collected.addAll(content);
+        final queryParameters = <String, dynamic>{...baseVariant, 'page': page};
+        for (var attempt = 0; attempt < 2; attempt++) {
+          try {
+            final response = await _client.dio.get(
+              '/api/v1.0/clients/campaigns/$campaignId/impressions',
+              queryParameters: queryParameters,
+              options: Options(
+                listFormat: ListFormat.multi,
+                receiveTimeout: const Duration(seconds: 20),
+              ),
+            );
+            final data = response.data;
+            if (data is! Map<String, dynamic>) {
+              page = maxPages;
+              break;
+            }
+            final content = (data['content'] as List? ?? const [])
+                .whereType<Map<String, dynamic>>()
+                .toList();
+            if (content.isEmpty) {
+              page = maxPages;
+              break;
+            }
+            collected.addAll(content);
 
-          final isLast = data['last'] == true;
-          if (isLast || content.length < pageSize) {
+            final isLast = data['last'] == true;
+            final totalPages = (data['totalPages'] as num?)?.toInt();
+            if (isLast ||
+                content.length < pageSize ||
+                (totalPages != null && page + 1 >= totalPages)) {
+              page = maxPages;
+            }
+            break;
+          } on DioException catch (e) {
+            lastError = e;
+            final status = e.response?.statusCode ?? 0;
+            final isRetryable = status == 502 || status == 503 || status == 504;
+            if (attempt == 0 && isRetryable) {
+              await Future<void>.delayed(const Duration(milliseconds: 250));
+              continue;
+            }
+            page = maxPages;
             break;
           }
-        } on DioException catch (e) {
-          lastError = e;
-          break;
         }
       }
       if (collected.isNotEmpty) {
