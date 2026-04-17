@@ -77,7 +77,8 @@ class ServiceDashboardScreen extends ConsumerWidget {
               ),
               data: (summaries) {
                 final overallSummaries =
-                    state.overallSummaries.asData?.value ?? const <ServiceDashboardCampaignSummary>[];
+                    state.overallSummaries.asData?.value ??
+                    const <ServiceDashboardCampaignSummary>[];
                 final totals = _buildTotals(filteredCampaigns, summaries);
                 final overallTotals = _buildTotals(campaigns, overallSummaries);
                 final hasActiveFilters = _activeFilters(state.query).isNotEmpty;
@@ -342,9 +343,9 @@ class ServiceDashboardScreen extends ConsumerWidget {
       builder: (context, child) {
         return Theme(
           data: Theme.of(context).copyWith(
-            colorScheme: Theme.of(context).colorScheme.copyWith(
-              primary: kAccent,
-            ),
+            colorScheme: Theme.of(
+              context,
+            ).colorScheme.copyWith(primary: kAccent),
           ),
           child: child!,
         );
@@ -366,16 +367,11 @@ class ServiceDashboardScreen extends ConsumerWidget {
       59,
       59,
     );
-    final inclusiveDays = end
-            .difference(start)
-            .inDays +
-        1;
+    final inclusiveDays = end.difference(start).inDays + 1;
 
     if (inclusiveDays > 31) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Период не должен превышать 31 день.'),
-        ),
+        const SnackBar(content: Text('Период не должен превышать 31 день.')),
       );
       return;
     }
@@ -459,13 +455,15 @@ class ServiceDashboardScreen extends ConsumerWidget {
 
   static String? _shareText(double value, double total) {
     if (total <= 0) return null;
-    final percent = (value / total) * 100;
+    final safeTotal = total < value ? value : total;
+    final percent = ((value / safeTotal) * 100).clamp(0, 100).toDouble();
     return '${_formatPercent(percent)} от общего';
   }
 
   static String? _shareTextInt(int value, int total) {
     if (total <= 0) return null;
-    final percent = (value / total) * 100;
+    final safeTotal = total < value ? value : total;
+    final percent = ((value / safeTotal) * 100).clamp(0, 100).toDouble();
     return '${_formatPercent(percent)} от общего';
   }
 
@@ -603,11 +601,7 @@ class _KpiCard extends StatelessWidget {
   final String value;
   final String? shareText;
 
-  const _KpiCard({
-    required this.label,
-    required this.value,
-    this.shareText,
-  });
+  const _KpiCard({required this.label, required this.value, this.shareText});
 
   @override
   Widget build(BuildContext context) {
@@ -779,7 +773,6 @@ class _MiniStat extends StatelessWidget {
   }
 }
 
-
 class _MultiSelectSection extends StatelessWidget {
   final String title;
   final List<String> options;
@@ -850,20 +843,20 @@ class _MultiSelectSection extends StatelessWidget {
               spacing: 8,
               runSpacing: 8,
               children: visibleOptions.map((option) {
-              final isSelected = selected.contains(option);
-              return FilterChip(
-                selected: isSelected,
-                label: Text(option),
-                onSelected: (value) {
-                  if (value) {
-                    selected.add(option);
-                  } else {
-                    selected.remove(option);
-                  }
-                  onChanged();
-                },
-              );
-            }).toList(),
+                final isSelected = selected.contains(option);
+                return FilterChip(
+                  selected: isSelected,
+                  label: Text(option),
+                  onSelected: (value) {
+                    if (value) {
+                      selected.add(option);
+                    } else {
+                      selected.remove(option);
+                    }
+                    onChanged();
+                  },
+                );
+              }).toList(),
             ),
         ],
       ),
