@@ -119,3 +119,127 @@ final campaignStatsProvider = FutureProvider.family<CampaignStats, String>((
   }
   return CampaignStats.empty();
 });
+
+class CampaignPhotoCoverage {
+  final int totalSides;
+  final int sidesWithPhoto;
+
+  const CampaignPhotoCoverage({
+    required this.totalSides,
+    required this.sidesWithPhoto,
+  });
+
+  double get percent =>
+      totalSides > 0 ? (sidesWithPhoto / totalSides) * 100 : 0.0;
+}
+
+final campaignPhotoCoverageProvider =
+    FutureProvider.family<CampaignPhotoCoverage, String>((ref, id) async {
+      final client = Omni360Client().dio;
+
+      final detailResp = await client.get('/api/v1.0/clients/campaigns/$id');
+      final detail = detailResp.data;
+      if (detail is! Map<String, dynamic>) {
+        return const CampaignPhotoCoverage(totalSides: 0, sidesWithPhoto: 0);
+      }
+
+      final segmentIds = (detail['segments'] as List? ?? const [])
+          .map((s) => ((s as Map?)?['id'] as num?)?.toInt())
+          .whereType<int>()
+          .toList();
+
+      final sideKeys = <String>{};
+      for (final segmentId in segmentIds) {
+        try {
+          final segResp = await client.get(
+            '/api/v1.0/clients/campaigns/$id/segments/$segmentId',
+            queryParameters: {'withPlatformFee': false},
+          );
+          final segData = segResp.data;
+          if (segData is! Map<String, dynamic>) continue;
+          final inventories = (segData['inventories'] as List? ?? const [])
+              .whereType<Map<String, dynamic>>();
+          for (final inv in inventories) {
+            final invId = (inv['id'] as num?)?.toInt();
+            final gid = inv['gid']?.toString();
+            final side = inv['side']?.toString();
+            final key = invId != null
+                ? 'id:$invId'
+                : 'gid:${gid ?? ''}|side:${side ?? ''}';
+            if (key != 'gid:|side:') {
+              sideKeys.add(key);
+            }
+          }
+        } catch (_) {
+          // ignore segment errors, continue with remaining segments
+        }
+      }
+
+      String? toApiDateTime(String? date, {required bool endOfDay}) {
+        if (date == null || date.isEmpty) return null;
+        final trimmed = date.trim();
+        if (trimmed.contains('T')) return trimmed;
+        return '${trimmed}T${endOfDay ? '23:59:59' : '00:00:00'}';
+      }
+
+      final startDate = toApiDateTime(
+        detail['startDate']?.toString(),
+        endOfDay: false,
+      );
+      final endDate = toApiDateTime(
+        detail['endDate']?.toString(),
+        endOfDay: true,
+      );
+
+      final rows = <Map<String, dynamic>>[];
+      var page = 0;
+      const size = 500;
+      while (true) {
+        final params = <String, dynamic>{
+          'page': page,
+          'size': size,
+          'withShots': true,
+          if (startDate != null) 'localStartDate': startDate,
+          if (endDate != null) 'localEndDate': endDate,
+        };
+        final resp = await client.get(
+          '/api/v1.0/clients/campaigns/$id/impression-inventory-stats',
+          queryParameters: params,
+          options: Options(listFormat: ListFormat.multi),
+        );
+        final data = resp.data;
+        if (data is! List) break;
+        final chunk = data.whereType<Map<String, dynamic>>().toList();
+        if (chunk.isEmpty) break;
+        rows.addAll(chunk);
+        if (chunk.length < size) break;
+        page++;
+        if (page >= 20) break;
+      }
+
+      final withPhotoKeys = <String>{};
+      for (final row in rows) {
+        final shotCount = (row['shotCount'] as num?)?.toInt() ?? 0;
+        if (shotCount <= 0) continue;
+        final inv = row['inventory'];
+        final invId = (inv is Map ? (inv['id'] as num?)?.toInt() : null);
+        final invName = inv is Map ? inv['name']?.toString() : null;
+        final side = row['side']?.toString();
+        final key = invId != null
+            ? 'id:$invId'
+            : 'gid:${invName ?? ''}|side:${side ?? ''}';
+        if (key != 'gid:|side:') {
+          withPhotoKeys.add(key);
+        }
+      }
+
+      final totalSides = sideKeys.isNotEmpty ? sideKeys.length : rows.length;
+      final sidesWithPhoto = withPhotoKeys.length;
+
+      return CampaignPhotoCoverage(
+        totalSides: totalSides,
+        sidesWithPhoto: sidesWithPhoto > totalSides && totalSides > 0
+            ? totalSides
+            : sidesWithPhoto,
+      );
+    });

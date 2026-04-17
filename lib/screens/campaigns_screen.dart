@@ -1030,6 +1030,35 @@ class _CampaignCard extends ConsumerWidget {
               ],
             ),
 
+            if (c.spent != null || c.budget != null) ...[
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Потрачено: ${c.spent != null ? fmt.format(c.spent) : '—'}',
+                      style: const TextStyle(
+                        color: kTextSecondary,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    child: Text(
+                      'Осталось: ${c.budget != null ? fmt.format(((c.budget ?? 0) - (c.spent ?? 0)).clamp(0.0, double.infinity)) : '—'}',
+                      textAlign: TextAlign.right,
+                      style: const TextStyle(
+                        color: kTextSecondary,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+
             // Budget progress bar
             if (ratio != null) ...[
               const SizedBox(height: 10),
