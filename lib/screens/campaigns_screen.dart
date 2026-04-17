@@ -885,6 +885,7 @@ class _CampaignCard extends ConsumerWidget {
     final cardStats = (c.isActive || c.spent == null)
         ? ref.watch(campaignStatsProvider(c.id)).whenOrNull(data: (s) => s)
         : null;
+    final photoCoverage = ref.watch(campaignPhotoCoverageProvider(c.id));
     final effectiveSpent = (c.spent != null && c.spent! > 0)
         ? c.spent
         : (cardStats != null && cardStats.factBudget > 0
@@ -1061,6 +1062,26 @@ class _CampaignCard extends ConsumerWidget {
                 ],
               ),
             ],
+
+            const SizedBox(height: 6),
+            photoCoverage.maybeWhen(
+              data: (coverage) => Text(
+                'Фотоотчёты: ${coverage.percent.toStringAsFixed(1)}% (${coverage.sidesWithPhoto}/${coverage.totalSides})',
+                style: const TextStyle(
+                  color: kTextSecondary,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              orElse: () => const Text(
+                'Фотоотчёты: —',
+                style: TextStyle(
+                  color: kTextSecondary,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
 
             // Budget progress bar
             if (ratio != null) ...[
