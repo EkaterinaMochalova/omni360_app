@@ -17,6 +17,7 @@ class CampaignDetailScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final detail = ref.watch(campaignDetailProvider(campaignId));
     final stats = ref.watch(campaignStatsProvider(campaignId));
+    final photoCoverage = ref.watch(campaignPhotoCoverageProvider(campaignId));
 
     return Scaffold(
       backgroundColor: kBg,
@@ -63,6 +64,8 @@ class CampaignDetailScreen extends ConsumerWidget {
               _StatusCard(campaign: campaign),
               const SizedBox(height: 12),
               _DatesCard(campaign: campaign),
+              const SizedBox(height: 12),
+              _PhotoCoverageCard(coverage: photoCoverage),
               const SizedBox(height: 12),
               // Plan / Fact card — passes stats when loaded
               stats.maybeWhen(
@@ -194,6 +197,85 @@ class _DatesCard extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _PhotoCoverageCard extends StatelessWidget {
+  final AsyncValue<CampaignPhotoCoverage> coverage;
+
+  const _PhotoCoverageCard({required this.coverage});
+
+  @override
+  Widget build(BuildContext context) {
+    return _Card(
+      child: coverage.when(
+        loading: () => const Row(
+          children: [
+            Icon(Icons.photo_camera_outlined, size: 18, color: kTextSecondary),
+            SizedBox(width: 8),
+            Text(
+              'Фотоотчёты по сторонам: загрузка...',
+              style: TextStyle(color: kTextSecondary, fontSize: 13),
+            ),
+          ],
+        ),
+        error: (_, __) => const Row(
+          children: [
+            Icon(Icons.photo_camera_outlined, size: 18, color: kTextSecondary),
+            SizedBox(width: 8),
+            Text(
+              'Фотоотчёты по сторонам: нет данных',
+              style: TextStyle(color: kTextSecondary, fontSize: 13),
+            ),
+          ],
+        ),
+        data: (value) {
+          final percent = value.percent.clamp(0, 100).toDouble();
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Row(
+                children: [
+                  Icon(
+                    Icons.photo_camera_outlined,
+                    size: 18,
+                    color: kTextSecondary,
+                  ),
+                  SizedBox(width: 8),
+                  Text(
+                    'Фотоотчёты по сторонам',
+                    style: TextStyle(
+                      color: kTextPrimary,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '${percent.toStringAsFixed(1)}% (${value.sidesWithPhoto}/${value.totalSides})',
+                style: const TextStyle(
+                  color: kTextPrimary,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 8),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: LinearProgressIndicator(
+                  value: percent / 100,
+                  backgroundColor: const Color(0xFFE8EAF6),
+                  valueColor: const AlwaysStoppedAnimation(kAccent),
+                  minHeight: 6,
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
