@@ -100,6 +100,45 @@ class ServiceDashboardScreen extends ConsumerWidget {
                         ),
                       ),
                     _SectionCard(
+                      title: 'План на месяц',
+                      subtitle:
+                          'Активные кампании + кампании, завершённые в текущем месяце. Учтён только бюджет в рамках месяца.',
+                      child: state.monthlyPlan.when(
+                        loading: () => const Text(
+                          'Считаем план на месяц...',
+                          style: TextStyle(color: kTextSecondary),
+                        ),
+                        error: (e, _) => Text(
+                          'Не удалось посчитать план на месяц: $e',
+                          style: const TextStyle(color: kTextSecondary),
+                        ),
+                        data: (monthly) => Wrap(
+                          spacing: 10,
+                          runSpacing: 10,
+                          children: [
+                            _KpiCard(
+                              label:
+                                  'Итого план на ${DateFormat('LLLL', 'ru_RU').format(monthly.monthStart)}',
+                              value: _money(monthly.totalBudget),
+                            ),
+                            _KpiCard(
+                              label: 'Кампаний в расчёте',
+                              value: _int(monthly.campaignCount),
+                            ),
+                            _KpiCard(
+                              label: 'Активных',
+                              value: _int(monthly.activeCampaignCount),
+                            ),
+                            _KpiCard(
+                              label: 'Завершены в месяце',
+                              value: _int(monthly.completedThisMonthCount),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    _SectionCard(
                       title: 'KPI',
                       subtitle: hasActiveFilters
                           ? 'Факт рассчитан по выбранным фильтрам. Проценты показывают долю от всех кампаний за тот же период.'

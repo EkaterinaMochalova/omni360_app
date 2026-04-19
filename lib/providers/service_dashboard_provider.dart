@@ -14,6 +14,7 @@ class ServiceDashboardState {
   final AsyncValue<List<ServiceDashboardCampaignSummary>> overallSummaries;
   final AsyncValue<List<ServiceDashboardOperatorSummary>> operatorSummaries;
   final AsyncValue<List<ServiceDashboardCitySummary>> citySummaries;
+  final AsyncValue<ServiceDashboardMonthlyPlan> monthlyPlan;
   final ServiceDashboardQuery query;
   final ServiceDashboardFiltersData filters;
 
@@ -23,6 +24,7 @@ class ServiceDashboardState {
     required this.overallSummaries,
     required this.operatorSummaries,
     required this.citySummaries,
+    required this.monthlyPlan,
     required this.query,
     required this.filters,
   });
@@ -33,6 +35,7 @@ class ServiceDashboardState {
     overallSummaries: const AsyncValue.data([]),
     operatorSummaries: const AsyncValue.data([]),
     citySummaries: const AsyncValue.data([]),
+    monthlyPlan: const AsyncValue.loading(),
     query: ServiceDashboardQuery.initial(),
     filters: const ServiceDashboardFiltersData(
       brands: [],
@@ -51,6 +54,7 @@ class ServiceDashboardState {
     AsyncValue<List<ServiceDashboardCampaignSummary>>? overallSummaries,
     AsyncValue<List<ServiceDashboardOperatorSummary>>? operatorSummaries,
     AsyncValue<List<ServiceDashboardCitySummary>>? citySummaries,
+    AsyncValue<ServiceDashboardMonthlyPlan>? monthlyPlan,
     ServiceDashboardQuery? query,
     ServiceDashboardFiltersData? filters,
   }) {
@@ -60,6 +64,7 @@ class ServiceDashboardState {
       overallSummaries: overallSummaries ?? this.overallSummaries,
       operatorSummaries: operatorSummaries ?? this.operatorSummaries,
       citySummaries: citySummaries ?? this.citySummaries,
+      monthlyPlan: monthlyPlan ?? this.monthlyPlan,
       query: query ?? this.query,
       filters: filters ?? this.filters,
     );
@@ -78,6 +83,7 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
   final Map<String, Campaign> _campaignDetailCache = {};
   final Map<String, Map<int, Map<String, dynamic>>> _campaignSegmentCache = {};
   final Map<String, _DashboardFactCacheEntry> _factCache = {};
+  final Map<int, double> _campaignTotalSpentCache = {};
   static const Duration _factCacheTtl = Duration(minutes: 10);
   static const List<String> _fallbackFormats = <String>[
     'BILLBOARD',
@@ -131,6 +137,7 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
       overallSummaries: const AsyncValue.loading(),
       operatorSummaries: const AsyncValue.loading(),
       citySummaries: const AsyncValue.loading(),
+      monthlyPlan: const AsyncValue.loading(),
     );
     try {
       final hasActiveFilters = _hasActiveFilters(state.query);
@@ -159,6 +166,7 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
         overallQuery,
         filters: state.filters,
       );
+      final monthlyPlanFuture = _buildMonthlyPlan(campaigns);
       final overallFuture = hasActiveFilters
           ? _fetchCampaignStats(
               overallCampaignsForPeriod,
@@ -168,11 +176,13 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
           : Future.value(const <ServiceDashboardCampaignSummary>[]);
       if (filteredCampaigns.isEmpty) {
         final overallSummaries = await overallFuture;
+        final monthlyPlan = await monthlyPlanFuture;
         state = state.copyWith(
           summaries: const AsyncValue.data([]),
           overallSummaries: AsyncValue.data(overallSummaries),
           operatorSummaries: const AsyncValue.data([]),
           citySummaries: const AsyncValue.data([]),
+          monthlyPlan: AsyncValue.data(monthlyPlan),
         );
         return;
       }
@@ -188,11 +198,13 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
         },
       );
       final overallSummaries = await overallFuture;
+      final monthlyPlan = await monthlyPlanFuture;
       state = state.copyWith(
         summaries: AsyncValue.data(_sortSummaries(summaries)),
         overallSummaries: AsyncValue.data(overallSummaries),
         operatorSummaries: const AsyncValue.data([]),
         citySummaries: const AsyncValue.data([]),
+        monthlyPlan: AsyncValue.data(monthlyPlan),
       );
     } catch (e, st) {
       state = state.copyWith(
@@ -200,6 +212,7 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
         overallSummaries: AsyncValue.error(e, st),
         operatorSummaries: AsyncValue.error(e, st),
         citySummaries: AsyncValue.error(e, st),
+        monthlyPlan: AsyncValue.error(e, st),
       );
     }
   }
@@ -1227,6 +1240,222 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
     final copy = [...summaries];
     copy.sort((a, b) => b.spent.compareTo(a.spent));
     return copy;
+  }
+
+  Future<ServiceDashboardMonthlyPlan> _buildMonthlyPlan(
+    List<Campaign> campaigns,
+  ) async {
+    final now = DateTime.now();
+    final monthStart = DateTime(now.year, now.month, 1);
+    final monthEnd = DateTime(now.year, now.month + 1, 0, 23, 59, 59);
+
+    final selected = campaigns.where((campaign) {
+      if (!_campaignIntersectsRange(campaign, monthStart, monthEnd)) {
+        return false;
+      }
+      final end = _parseCampaignBoundary(campaign.endDate);
+      final completedThisMonth =
+          end != null &&
+          end.year == now.year &&
+          end.month == now.month &&
+          !campaign.isActive;
+      return campaign.isActive || completedThisMonth;
+    }).toList();
+
+    if (selected.isEmpty) {
+      return ServiceDashboardMonthlyPlan(
+        totalBudget: 0,
+        campaignCount: 0,
+        activeCampaignCount: 0,
+        completedThisMonthCount: 0,
+        monthStart: monthStart,
+        monthEnd: monthEnd,
+      );
+    }
+
+    const chunkSize = 4;
+    var totalBudget = 0.0;
+    for (var i = 0; i < selected.length; i += chunkSize) {
+      final chunk = selected.skip(i).take(chunkSize).toList();
+      final values = await Future.wait(
+        chunk.map(
+          (c) => _computeCampaignMonthlyBudget(c, monthStart, monthEnd),
+        ),
+      );
+      totalBudget += values.fold(0.0, (sum, item) => sum + item);
+    }
+
+    final completedThisMonthCount = selected.where((campaign) {
+      final end = _parseCampaignBoundary(campaign.endDate);
+      return end != null &&
+          end.year == now.year &&
+          end.month == now.month &&
+          !campaign.isActive;
+    }).length;
+
+    return ServiceDashboardMonthlyPlan(
+      totalBudget: totalBudget,
+      campaignCount: selected.length,
+      activeCampaignCount: selected
+          .where((campaign) => campaign.isActive)
+          .length,
+      completedThisMonthCount: completedThisMonthCount,
+      monthStart: monthStart,
+      monthEnd: monthEnd,
+    );
+  }
+
+  Future<double> _computeCampaignMonthlyBudget(
+    Campaign campaign,
+    DateTime monthStart,
+    DateTime monthEnd,
+  ) async {
+    final campaignId = int.tryParse(campaign.id);
+    final totalBudget = campaign.budget ?? 0;
+    if (campaignId == null || totalBudget <= 0) return 0;
+
+    final campaignStart =
+        _parseCampaignBoundary(campaign.startDate) ?? monthStart;
+    final campaignEndDateOnly =
+        _parseCampaignBoundary(campaign.endDate) ?? monthEnd;
+    final campaignEnd = DateTime(
+      campaignEndDateOnly.year,
+      campaignEndDateOnly.month,
+      campaignEndDateOnly.day,
+      23,
+      59,
+      59,
+    );
+
+    final effectiveStart = campaignStart.isAfter(monthStart)
+        ? campaignStart
+        : monthStart;
+    final effectiveEnd = campaignEnd.isBefore(monthEnd)
+        ? campaignEnd
+        : monthEnd;
+    if (effectiveEnd.isBefore(effectiveStart)) return 0;
+
+    final now = DateTime.now();
+    final pastEnd = effectiveEnd.isBefore(now) ? effectiveEnd : now;
+    final hasPast = !pastEnd.isBefore(effectiveStart);
+
+    double monthFactPast = 0;
+    if (hasPast) {
+      monthFactPast = await _fetchSpentInRange(
+        campaignId,
+        effectiveStart,
+        pastEnd,
+      );
+    }
+
+    DateTime futureStart;
+    if (hasPast) {
+      futureStart = DateTime(
+        pastEnd.year,
+        pastEnd.month,
+        pastEnd.day,
+      ).add(const Duration(days: 1));
+    } else {
+      futureStart = effectiveStart;
+    }
+    if (futureStart.isAfter(effectiveEnd)) {
+      return monthFactPast;
+    }
+
+    final spentToDate = await _fetchCampaignTotalSpent(campaignId, campaign);
+    final remainingBudget = (totalBudget - spentToDate).clamp(
+      0.0,
+      double.infinity,
+    );
+    if (remainingBudget <= 0) {
+      return monthFactPast;
+    }
+
+    final remainingCampaignStart = futureStart.isAfter(campaignStart)
+        ? futureStart
+        : campaignStart;
+    if (campaignEnd.isBefore(remainingCampaignStart)) {
+      return monthFactPast;
+    }
+
+    final remainingCampaignDays = _inclusiveDays(
+      remainingCampaignStart,
+      campaignEnd,
+    );
+    final remainingMonthDays = _inclusiveDays(futureStart, effectiveEnd);
+    if (remainingCampaignDays <= 0 || remainingMonthDays <= 0) {
+      return monthFactPast;
+    }
+
+    final plannedFuture =
+        remainingBudget * (remainingMonthDays / remainingCampaignDays);
+    return monthFactPast + plannedFuture;
+  }
+
+  Future<double> _fetchCampaignTotalSpent(
+    int campaignId,
+    Campaign campaign,
+  ) async {
+    if (campaign.spent != null && campaign.spent! > 0) {
+      return campaign.spent!;
+    }
+    final cached = _campaignTotalSpentCache[campaignId];
+    if (cached != null) return cached;
+
+    try {
+      final response = await _client.dio.get(
+        '/api/v1.0/clients/campaigns/$campaignId/impression-stats',
+        queryParameters: {'reqList': '{}'},
+      );
+      final data = response.data;
+      if (data is Map<String, dynamic>) {
+        final customerStats = data['customerStats'] as Map<String, dynamic>?;
+        final spent = _toDouble(
+          data['totalBudgetShowed'] ??
+              customerStats?['budgetShowed'] ??
+              data['dailyBudgetShowed'],
+        );
+        _campaignTotalSpentCache[campaignId] = spent;
+        return spent;
+      }
+    } catch (_) {}
+    return campaign.spent ?? 0;
+  }
+
+  Future<double> _fetchSpentInRange(
+    int campaignId,
+    DateTime start,
+    DateTime end,
+  ) async {
+    final query = ServiceDashboardQuery(
+      start: start,
+      end: end,
+      campaignSearch: '',
+      brands: const {},
+      advertisers: const {},
+      operators: const {},
+      cities: const {},
+      formats: const {},
+    );
+    final rows = await _fetchImpressionsRows(
+      campaignId: campaignId,
+      query: query,
+      selectedOperatorIds: const [],
+      selectedCityIds: const [],
+    );
+    if (rows == null || rows.isEmpty) return 0;
+    return rows.fold<double>(0, (sum, row) => sum + _impressionRowSpent(row));
+  }
+
+  double _impressionRowSpent(Map<String, dynamic> row) {
+    return _toDouble(row['chargedPrice'] ?? row['price'] ?? row['chargedCpm']);
+  }
+
+  int _inclusiveDays(DateTime start, DateTime end) {
+    if (end.isBefore(start)) return 0;
+    final s = DateTime(start.year, start.month, start.day);
+    final e = DateTime(end.year, end.month, end.day);
+    return e.difference(s).inDays + 1;
   }
 }
 

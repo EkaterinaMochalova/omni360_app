@@ -123,9 +123,11 @@ class ServiceDashboardCampaignSummary {
       (sum, row) =>
           sum +
           _toDouble(
-            (row['customerStats'] as Map<String, dynamic>?)?['dailyBudgetShowed'] ??
+            (row['customerStats']
+                    as Map<String, dynamic>?)?['dailyBudgetShowed'] ??
                 row['dailyBudgetShowed'] ??
-                (row['customerStats'] as Map<String, dynamic>?)?['budgetShowed'] ??
+                (row['customerStats']
+                    as Map<String, dynamic>?)?['budgetShowed'] ??
                 row['totalBudgetShowed'],
           ),
     );
@@ -172,8 +174,10 @@ class ServiceDashboardCampaignSummary {
           sum +
           _toDouble(
             row['customerStats'] is Map<String, dynamic>
-                ? ((row['customerStats'] as Map<String, dynamic>)['dailyBudgetShowed'] ??
-                      (row['customerStats'] as Map<String, dynamic>)['budgetShowed'])
+                ? ((row['customerStats']
+                          as Map<String, dynamic>)['dailyBudgetShowed'] ??
+                      (row['customerStats']
+                          as Map<String, dynamic>)['budgetShowed'])
                 : (row['dailyShowedBudget'] ?? row['totalShowedBudget']),
           ),
     );
@@ -195,13 +199,17 @@ class ServiceDashboardCampaignSummary {
           sum +
           _toDouble(
             row['customerStats'] is Map<String, dynamic>
-                ? ((row['customerStats'] as Map<String, dynamic>)['dailyBudgetShowed'] ??
-                      (row['customerStats'] as Map<String, dynamic>)['budgetShowed'])
+                ? ((row['customerStats']
+                          as Map<String, dynamic>)['dailyBudgetShowed'] ??
+                      (row['customerStats']
+                          as Map<String, dynamic>)['budgetShowed'])
                 : (row['dailyShowedBudget'] ?? row['totalShowedBudget']),
           ),
     );
     final showPrice = impressions > 0 ? spent / impressions : 0.0;
-    final cpm = impressions > 0 ? (weightedSpendForCpm / impressions) * 1000 : 0.0;
+    final cpm = impressions > 0
+        ? (weightedSpendForCpm / impressions) * 1000
+        : 0.0;
 
     return ServiceDashboardCampaignSummary(
       campaignId: int.tryParse(campaign.id) ?? 0,
@@ -223,9 +231,7 @@ class ServiceDashboardCampaignSummary {
       0,
       (sum, row) =>
           sum +
-          _toDouble(
-            row['chargedPrice'] ?? row['price'] ?? row['chargedCpm'],
-          ),
+          _toDouble(row['chargedPrice'] ?? row['price'] ?? row['chargedCpm']),
     );
     final impressions = rows.length;
     final ots = rows.fold<int>(
@@ -261,7 +267,9 @@ class ServiceDashboardCampaignSummary {
     final spent = stats.factBudget;
     final ots = stats.factOts.round();
     final showPrice = impressions > 0 ? spent / impressions : 0.0;
-    final cpm = stats.cpm > 0 ? stats.cpm : (impressions > 0 ? showPrice * 1000 : 0.0);
+    final cpm = stats.cpm > 0
+        ? stats.cpm
+        : (impressions > 0 ? showPrice * 1000 : 0.0);
 
     return ServiceDashboardCampaignSummary(
       campaignId: int.tryParse(campaign.id) ?? 0,
@@ -341,6 +349,24 @@ class ServiceDashboardTotals {
     required this.totalOts,
     required this.avgCostPerExit,
     required this.avgOtsPerExit,
+  });
+}
+
+class ServiceDashboardMonthlyPlan {
+  final double totalBudget;
+  final int campaignCount;
+  final int activeCampaignCount;
+  final int completedThisMonthCount;
+  final DateTime monthStart;
+  final DateTime monthEnd;
+
+  const ServiceDashboardMonthlyPlan({
+    required this.totalBudget,
+    required this.campaignCount,
+    required this.activeCampaignCount,
+    required this.completedThisMonthCount,
+    required this.monthStart,
+    required this.monthEnd,
   });
 }
 
