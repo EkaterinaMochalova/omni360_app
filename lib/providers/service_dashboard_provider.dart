@@ -567,9 +567,18 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
 
     for (var i = 0; i < campaigns.length; i += chunkSize) {
       final chunk = campaigns.skip(i).take(chunkSize).toList();
-      final chunkResult = await _fetchInventoryFactChunk(chunk, query, filters);
-      aggregated.addAll(chunkResult);
-      onProgress?.call(List.unmodifiable(aggregated));
+      await Future.wait(
+        chunk.map((campaign) async {
+          final summary = await _fetchInventoryFactForCampaign(
+            campaign,
+            query,
+            filters,
+          );
+          if (summary == null) return;
+          aggregated.add(summary);
+          onProgress?.call(List.unmodifiable(aggregated));
+        }),
+      );
     }
 
     return aggregated;
@@ -684,20 +693,6 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
       campaign,
       CampaignStats.empty(),
     );
-  }
-
-  Future<List<ServiceDashboardCampaignSummary>> _fetchInventoryFactChunk(
-    List<Campaign> campaigns,
-    ServiceDashboardQuery query,
-    ServiceDashboardFiltersData filters,
-  ) async {
-    final summaries = await Future.wait(
-      campaigns.map(
-        (campaign) => _fetchInventoryFactForCampaign(campaign, query, filters),
-      ),
-    );
-
-    return summaries.whereType<ServiceDashboardCampaignSummary>().toList();
   }
 
   Future<ServiceDashboardCampaignSummary?> _fetchInventoryFactForCampaign(
@@ -1099,17 +1094,7 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
       operatorIds = _extractNamedIdMap(operatorsResponse);
     } catch (_) {}
 
-    var formats = <String>{};
-    try {
-      final formatsResponse = await _client.dio.get(
-        '/api/v1.0/clients/inventories/formats',
-      );
-      formats.addAll(_extractNamedItems(formatsResponse.data));
-      formats.addAll(_extractStringItems(formatsResponse.data));
-    } catch (_) {}
-    if (formats.isEmpty) {
-      formats.addAll(_fallbackFormats);
-    }
+    final formats = <String>{..._fallbackFormats};
 
     return ServiceDashboardFiltersData(
       brands: const [],
@@ -1152,22 +1137,6 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
     return rawItems
         .whereType<Map<String, dynamic>>()
         .map((item) => item['name']?.toString() ?? '')
-        .where((name) => name.isNotEmpty)
-        .toSet()
-        .toList()
-      ..sort();
-  }
-
-  static List<String> _extractStringItems(dynamic data) {
-    final rawItems = switch (data) {
-      List<dynamic> _ => data,
-      {'content': List<dynamic> content} => content,
-      {'data': List<dynamic> items} => items,
-      _ => const <dynamic>[],
-    };
-
-    return rawItems
-        .map((item) => item?.toString() ?? '')
         .where((name) => name.isNotEmpty)
         .toSet()
         .toList()
