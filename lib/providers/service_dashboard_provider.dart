@@ -228,17 +228,17 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
         },
       );
       final overallSummaries = await overallFuture;
-      final monthlyPlan = await monthlyPlanFuture;
       state = state.copyWith(
         summaries: AsyncValue.data(_sortSummaries(summaries)),
         overallSummaries: AsyncValue.data(overallSummaries),
         operatorSummaries: const AsyncValue.data([]),
         citySummaries: const AsyncValue.data([]),
-        monthlyPlan: AsyncValue.data(monthlyPlan),
         isStatsLoading: false,
         statsLoadedCampaigns: filteredCampaigns.length,
         statsTotalCampaigns: filteredCampaigns.length,
       );
+      final monthlyPlan = await monthlyPlanFuture;
+      state = state.copyWith(monthlyPlan: AsyncValue.data(monthlyPlan));
     } catch (e, st) {
       state = state.copyWith(
         summaries: AsyncValue.error(e, st),
@@ -562,7 +562,7 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
     ServiceDashboardFiltersData filters, {
     void Function(List<ServiceDashboardCampaignSummary> partial)? onProgress,
   }) async {
-    const chunkSize = 4;
+    const chunkSize = 8;
     final aggregated = <ServiceDashboardCampaignSummary>[];
 
     for (var i = 0; i < campaigns.length; i += chunkSize) {
@@ -1432,6 +1432,11 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
     DateTime start,
     DateTime end,
   ) async {
+    final fastSpent = await _fetchSpentInRangeBySummary(campaignId, start, end);
+    if (fastSpent != null) {
+      return fastSpent;
+    }
+
     final query = ServiceDashboardQuery(
       start: start,
       end: end,
@@ -1450,6 +1455,76 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
     );
     if (rows == null || rows.isEmpty) return 0;
     return rows.fold<double>(0, (sum, row) => sum + _impressionRowSpent(row));
+  }
+
+  Future<double?> _fetchSpentInRangeBySummary(
+    int campaignId,
+    DateTime start,
+    DateTime end,
+  ) async {
+    final variants = <Map<String, dynamic>>[
+      {
+        'reqList.startDate': _formatApiDateTime(start),
+        'reqList.endDate': _formatApiDateTime(end),
+        'reqList.localStartDate': _formatApiDateTime(start),
+        'reqList.localEndDate': _formatApiDateTime(end),
+      },
+      {
+        'reqList[startDate]': _formatApiDateTime(start),
+        'reqList[endDate]': _formatApiDateTime(end),
+        'reqList[localStartDate]': _formatApiDateTime(start),
+        'reqList[localEndDate]': _formatApiDateTime(end),
+      },
+      {
+        'startDate': _formatApiDateTime(start),
+        'endDate': _formatApiDateTime(end),
+        'localStartDate': _formatApiDateTime(start),
+        'localEndDate': _formatApiDateTime(end),
+      },
+      {
+        'reqList': jsonEncode({
+          'startDate': _formatApiDateTime(start),
+          'endDate': _formatApiDateTime(end),
+          'localStartDate': _formatApiDateTime(start),
+          'localEndDate': _formatApiDateTime(end),
+        }),
+      },
+      {
+        'reqList': jsonEncode({
+          'startDate': _formatApiDateTime(start.toUtc()),
+          'endDate': _formatApiDateTime(end.toUtc()),
+        }),
+      },
+      {
+        'reqList': jsonEncode({
+          'startDate': _formatApiDateTime(start),
+          'endDate': _formatApiDateTime(end),
+        }),
+      },
+    ];
+
+    for (final variant in variants) {
+      try {
+        final response = await _client.dio.get(
+          '/api/v1.0/clients/campaigns/$campaignId/impression-stats',
+          queryParameters: variant,
+          options: Options(listFormat: ListFormat.multi),
+        );
+        final data = response.data;
+        if (data is! Map<String, dynamic>) continue;
+
+        final customerStats = data['customerStats'] as Map<String, dynamic>?;
+        return _toDouble(
+          data['totalBudgetShowed'] ??
+              customerStats?['budgetShowed'] ??
+              data['dailyBudgetShowed'],
+        );
+      } on DioException {
+        continue;
+      }
+    }
+
+    return null;
   }
 
   double _impressionRowSpent(Map<String, dynamic> row) {
