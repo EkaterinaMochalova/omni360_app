@@ -381,7 +381,8 @@ class _CampaignsScreenState extends ConsumerState<CampaignsScreen> {
           .where(
             (c) =>
                 c.name.toLowerCase().contains(q) ||
-                (c.advertiser?.toLowerCase().contains(q) ?? false),
+                (c.advertiser?.toLowerCase().contains(q) ?? false) ||
+                c.id.toLowerCase().contains(q),
           )
           .toList();
     }
@@ -549,7 +550,7 @@ class _CampaignsScreenState extends ConsumerState<CampaignsScreen> {
                   controller: _searchCtrl,
                   style: const TextStyle(fontSize: 14),
                   decoration: InputDecoration(
-                    hintText: 'Поиск по названию или рекламодателю',
+                    hintText: 'Поиск по названию, рекламодателю или ID',
                     hintStyle: const TextStyle(
                       color: kTextSecondary,
                       fontSize: 14,

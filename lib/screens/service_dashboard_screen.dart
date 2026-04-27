@@ -289,7 +289,7 @@ class ServiceDashboardScreen extends ConsumerWidget {
                     controller: searchCtrl,
                     decoration: const InputDecoration(
                       labelText: 'Кампании',
-                      hintText: 'Поиск по названию кампании',
+                      hintText: 'Поиск по названию или ID кампании',
                       border: OutlineInputBorder(),
                     ),
                   ),

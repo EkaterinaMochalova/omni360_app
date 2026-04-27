@@ -982,7 +982,9 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
         query.end,
       );
       final matchesSearch =
-          search.isEmpty || campaign.name.toLowerCase().contains(search);
+          search.isEmpty ||
+          campaign.name.toLowerCase().contains(search) ||
+          campaign.id.toLowerCase().contains(search);
       final matchesBrand =
           query.brands.isEmpty ||
           (campaign.brandName != null &&
