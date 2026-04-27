@@ -62,8 +62,14 @@ class ServiceDashboardScreen extends ConsumerWidget {
           ),
           Expanded(
             child: state.summaries.when(
-              loading: () => const Center(
-                child: CircularProgressIndicator(color: kAccent),
+              loading: () => Center(
+                child: SizedBox(
+                  width: 360,
+                  child: _LoadingProgressCard(
+                    loaded: state.statsLoadedCampaigns,
+                    total: state.statsTotalCampaigns,
+                  ),
+                ),
               ),
               error: (e, _) => Center(
                 child: Padding(
@@ -88,6 +94,14 @@ class ServiceDashboardScreen extends ConsumerWidget {
                 return ListView(
                   padding: const EdgeInsets.all(16),
                   children: [
+                    if (state.isStatsLoading)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: _LoadingProgressCard(
+                          loaded: state.statsLoadedCampaigns,
+                          total: state.statsTotalCampaigns,
+                        ),
+                      ),
                     if (_activeFilters(state.query).isNotEmpty)
                       Padding(
                         padding: const EdgeInsets.only(bottom: 12),
@@ -679,6 +693,54 @@ class _KpiCard extends StatelessWidget {
             ),
           ],
         ],
+      ),
+    );
+  }
+}
+
+class _LoadingProgressCard extends StatelessWidget {
+  const _LoadingProgressCard({required this.loaded, required this.total});
+
+  final int loaded;
+  final int total;
+
+  @override
+  Widget build(BuildContext context) {
+    final value = total > 0 ? (loaded / total).clamp(0.0, 1.0) : null;
+    final label = total > 0
+        ? 'Загружаем данные: $loaded из $total кампаний'
+        : 'Загружаем данные...';
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE6EAF3)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              label,
+              style: const TextStyle(
+                color: kTextPrimary,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 8),
+            LinearProgressIndicator(
+              value: value,
+              minHeight: 6,
+              backgroundColor: const Color(0xFFE8ECF5),
+              color: kAccent,
+              borderRadius: BorderRadius.circular(999),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -17,6 +17,9 @@ class ServiceDashboardState {
   final AsyncValue<ServiceDashboardMonthlyPlan> monthlyPlan;
   final ServiceDashboardQuery query;
   final ServiceDashboardFiltersData filters;
+  final bool isStatsLoading;
+  final int statsLoadedCampaigns;
+  final int statsTotalCampaigns;
 
   const ServiceDashboardState({
     required this.campaigns,
@@ -27,6 +30,9 @@ class ServiceDashboardState {
     required this.monthlyPlan,
     required this.query,
     required this.filters,
+    required this.isStatsLoading,
+    required this.statsLoadedCampaigns,
+    required this.statsTotalCampaigns,
   });
 
   factory ServiceDashboardState.initial() => ServiceDashboardState(
@@ -46,6 +52,9 @@ class ServiceDashboardState {
       operatorIds: {},
       cityIds: {},
     ),
+    isStatsLoading: false,
+    statsLoadedCampaigns: 0,
+    statsTotalCampaigns: 0,
   );
 
   ServiceDashboardState copyWith({
@@ -57,6 +66,9 @@ class ServiceDashboardState {
     AsyncValue<ServiceDashboardMonthlyPlan>? monthlyPlan,
     ServiceDashboardQuery? query,
     ServiceDashboardFiltersData? filters,
+    bool? isStatsLoading,
+    int? statsLoadedCampaigns,
+    int? statsTotalCampaigns,
   }) {
     return ServiceDashboardState(
       campaigns: campaigns ?? this.campaigns,
@@ -67,6 +79,9 @@ class ServiceDashboardState {
       monthlyPlan: monthlyPlan ?? this.monthlyPlan,
       query: query ?? this.query,
       filters: filters ?? this.filters,
+      isStatsLoading: isStatsLoading ?? this.isStatsLoading,
+      statsLoadedCampaigns: statsLoadedCampaigns ?? this.statsLoadedCampaigns,
+      statsTotalCampaigns: statsTotalCampaigns ?? this.statsTotalCampaigns,
     );
   }
 }
@@ -138,6 +153,9 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
       operatorSummaries: const AsyncValue.loading(),
       citySummaries: const AsyncValue.loading(),
       monthlyPlan: const AsyncValue.loading(),
+      isStatsLoading: true,
+      statsLoadedCampaigns: 0,
+      statsTotalCampaigns: 0,
     );
     try {
       final hasActiveFilters = _hasActiveFilters(state.query);
@@ -183,9 +201,18 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
           operatorSummaries: const AsyncValue.data([]),
           citySummaries: const AsyncValue.data([]),
           monthlyPlan: AsyncValue.data(monthlyPlan),
+          isStatsLoading: false,
+          statsLoadedCampaigns: 0,
+          statsTotalCampaigns: 0,
         );
         return;
       }
+
+      state = state.copyWith(
+        isStatsLoading: true,
+        statsLoadedCampaigns: 0,
+        statsTotalCampaigns: filteredCampaigns.length,
+      );
 
       final summaries = await _fetchCampaignStats(
         filteredCampaigns,
@@ -194,6 +221,9 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
         onProgress: (partial) {
           state = state.copyWith(
             summaries: AsyncValue.data(_sortSummaries(partial)),
+            isStatsLoading: true,
+            statsLoadedCampaigns: partial.length,
+            statsTotalCampaigns: filteredCampaigns.length,
           );
         },
       );
@@ -205,6 +235,9 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
         operatorSummaries: const AsyncValue.data([]),
         citySummaries: const AsyncValue.data([]),
         monthlyPlan: AsyncValue.data(monthlyPlan),
+        isStatsLoading: false,
+        statsLoadedCampaigns: filteredCampaigns.length,
+        statsTotalCampaigns: filteredCampaigns.length,
       );
     } catch (e, st) {
       state = state.copyWith(
@@ -213,6 +246,7 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
         operatorSummaries: AsyncValue.error(e, st),
         citySummaries: AsyncValue.error(e, st),
         monthlyPlan: AsyncValue.error(e, st),
+        isStatsLoading: false,
       );
     }
   }
