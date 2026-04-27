@@ -721,6 +721,15 @@ class _CampaignSummaryRow extends StatelessWidget {
                     ),
                     const SizedBox(height: 4),
                     Text(
+                      'ID: ${summary.campaignId}',
+                      style: const TextStyle(
+                        color: kTextSecondary,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
                       [
                         if (campaign?.brandName != null) campaign!.brandName,
                         if (campaign?.customerName != null)

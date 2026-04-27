@@ -966,6 +966,15 @@ class _CampaignCard extends ConsumerWidget {
                 ),
               ],
             ),
+            const SizedBox(height: 4),
+            Text(
+              'ID: ${c.id}',
+              style: const TextStyle(
+                color: kTextSecondary,
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
 
             if (alertDots != null) ...[
               const SizedBox(height: 6),

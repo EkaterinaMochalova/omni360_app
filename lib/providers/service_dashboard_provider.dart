@@ -819,8 +819,8 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
     required List<int> selectedOperatorIds,
     required List<int> selectedCityIds,
   }) async {
-    const pageSize = 500;
-    const maxPages = 8;
+    const pageSize = 200;
+    const maxPagesSafety = 200;
     final variants = <Map<String, dynamic>>[
       {
         'page': 0,
@@ -837,7 +837,7 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
     DioException? lastError;
     for (final baseVariant in variants) {
       final collected = <Map<String, dynamic>>[];
-      for (var page = 0; page < maxPages; page++) {
+      for (var page = 0; page < maxPagesSafety; page++) {
         final queryParameters = <String, dynamic>{...baseVariant, 'page': page};
         for (var attempt = 0; attempt < 2; attempt++) {
           try {
@@ -851,14 +851,14 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
             );
             final data = response.data;
             if (data is! Map<String, dynamic>) {
-              page = maxPages;
+              page = maxPagesSafety;
               break;
             }
             final content = (data['content'] as List? ?? const [])
                 .whereType<Map<String, dynamic>>()
                 .toList();
             if (content.isEmpty) {
-              page = maxPages;
+              page = maxPagesSafety;
               break;
             }
             collected.addAll(content);
@@ -868,7 +868,7 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
             if (isLast ||
                 content.length < pageSize ||
                 (totalPages != null && page + 1 >= totalPages)) {
-              page = maxPages;
+              page = maxPagesSafety;
             }
             break;
           } on DioException catch (e) {
@@ -879,7 +879,7 @@ class ServiceDashboardController extends StateNotifier<ServiceDashboardState> {
               await Future<void>.delayed(const Duration(milliseconds: 250));
               continue;
             }
-            page = maxPages;
+            page = maxPagesSafety;
             break;
           }
         }

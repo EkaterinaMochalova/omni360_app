@@ -143,38 +143,6 @@ final campaignPhotoCoverageProvider =
         return const CampaignPhotoCoverage(totalSides: 0, sidesWithPhoto: 0);
       }
 
-      final segmentIds = (detail['segments'] as List? ?? const [])
-          .map((s) => ((s as Map?)?['id'] as num?)?.toInt())
-          .whereType<int>()
-          .toList();
-
-      final sideKeys = <String>{};
-      for (final segmentId in segmentIds) {
-        try {
-          final segResp = await client.get(
-            '/api/v1.0/clients/campaigns/$id/segments/$segmentId',
-            queryParameters: {'withPlatformFee': false},
-          );
-          final segData = segResp.data;
-          if (segData is! Map<String, dynamic>) continue;
-          final inventories = (segData['inventories'] as List? ?? const [])
-              .whereType<Map<String, dynamic>>();
-          for (final inv in inventories) {
-            final invId = (inv['id'] as num?)?.toInt();
-            final gid = inv['gid']?.toString();
-            final side = inv['side']?.toString();
-            final key = invId != null
-                ? 'id:$invId'
-                : 'gid:${gid ?? ''}|side:${side ?? ''}';
-            if (key != 'gid:|side:') {
-              sideKeys.add(key);
-            }
-          }
-        } catch (_) {
-          // ignore segment errors, continue with remaining segments
-        }
-      }
-
       String? toApiDateTime(String? date, {required bool endOfDay}) {
         if (date == null || date.isEmpty) return null;
         final trimmed = date.trim();
@@ -198,10 +166,9 @@ final campaignPhotoCoverageProvider =
         final params = <String, dynamic>{
           'page': page,
           'size': size,
-          'withShots': true,
-          if (startDate != null) 'localStartDate': startDate,
-          if (endDate != null) 'localEndDate': endDate,
-        };
+          'localStartDate': startDate,
+          'localEndDate': endDate,
+        }..removeWhere((_, value) => value == null);
         final resp = await client.get(
           '/api/v1.0/clients/campaigns/$id/impression-inventory-stats',
           queryParameters: params,
@@ -217,23 +184,38 @@ final campaignPhotoCoverageProvider =
         if (page >= 20) break;
       }
 
-      final withPhotoKeys = <String>{};
-      for (final row in rows) {
-        final shotCount = (row['shotCount'] as num?)?.toInt() ?? 0;
-        if (shotCount <= 0) continue;
+      String sideKeyFromRow(Map<String, dynamic> row) {
         final inv = row['inventory'];
         final invId = (inv is Map ? (inv['id'] as num?)?.toInt() : null);
         final invName = inv is Map ? inv['name']?.toString() : null;
         final side = row['side']?.toString();
-        final key = invId != null
-            ? 'id:$invId'
-            : 'gid:${invName ?? ''}|side:${side ?? ''}';
-        if (key != 'gid:|side:') {
-          withPhotoKeys.add(key);
+        if (invId != null) return 'id:$invId';
+        if ((invName ?? '').isNotEmpty || (side ?? '').isNotEmpty) {
+          return 'gid:${invName ?? ''}|side:${side ?? ''}';
         }
+        return '';
       }
 
-      final totalSides = sideKeys.isNotEmpty ? sideKeys.length : rows.length;
+      bool hasShows(Map<String, dynamic> row) {
+        final showed = (row['totalShowed'] as num?)?.toInt() ?? 0;
+        final budget = (row['totalShowedBudget'] as num?)?.toDouble() ?? 0;
+        return showed > 0 || budget > 0;
+      }
+
+      final sidesWithShows = <String>{};
+      final withPhotoKeys = <String>{};
+      for (final row in rows) {
+        if (!hasShows(row)) continue;
+        final sideKey = sideKeyFromRow(row);
+        if (sideKey.isEmpty) continue;
+        sidesWithShows.add(sideKey);
+
+        final shotCount = (row['shotCount'] as num?)?.toInt() ?? 0;
+        if (shotCount <= 0) continue;
+        withPhotoKeys.add(sideKey);
+      }
+
+      final totalSides = sidesWithShows.length;
       final sidesWithPhoto = withPhotoKeys.length;
 
       return CampaignPhotoCoverage(
