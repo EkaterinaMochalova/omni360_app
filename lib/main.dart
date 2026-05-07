@@ -9,7 +9,7 @@ import 'screens/campaigns_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await initializeDateFormatting('ru_RU');
+  await initializeDateFormatting();
   Intl.defaultLocale = 'ru_RU';
   await AppNotificationsService.instance.initialize();
   runApp(const ProviderScope(child: Omni360App()));
