@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/date_symbol_data_local.dart';
+import 'package:intl/intl.dart';
 import 'providers/auth_provider.dart';
 import 'services/app_notifications_service.dart';
 import 'screens/login_screen.dart';
@@ -7,6 +9,8 @@ import 'screens/campaigns_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await initializeDateFormatting('ru_RU');
+  Intl.defaultLocale = 'ru_RU';
   await AppNotificationsService.instance.initialize();
   runApp(const ProviderScope(child: Omni360App()));
 }
