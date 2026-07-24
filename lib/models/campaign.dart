@@ -16,9 +16,9 @@ class TimeSlot {
   int get endHour => (relativeEndTime / 3600).ceil().clamp(0, 24);
 
   factory TimeSlot.fromJson(Map<String, dynamic> json) => TimeSlot(
-    dayOfWeek: (json['dayOfWeek'] as num?)?.toInt() ?? 1,
-    relativeStartTime: (json['relativeStartTime'] as num?)?.toInt() ?? 0,
-    relativeEndTime: (json['relativeEndTime'] as num?)?.toInt() ?? 86400,
+    dayOfWeek: Campaign._toInt(json['dayOfWeek']) ?? 1,
+    relativeStartTime: Campaign._toInt(json['relativeStartTime']) ?? 0,
+    relativeEndTime: Campaign._toInt(json['relativeEndTime']) ?? 86400,
   );
 }
 
@@ -94,9 +94,9 @@ class Campaign {
           json['advertiser']?.toString() ??
           json['advertiserName']?.toString() ??
           json['clientName']?.toString(),
-      customerId: (customer?['id'] as num?)?.toInt(),
+      customerId: _toInt(customer?['id']),
       customerName: customer?['name']?.toString(),
-      brandId: (brand?['id'] as num?)?.toInt(),
+      brandId: _toInt(brand?['id']),
       brandName: brand?['name']?.toString(),
       budget: _toDouble(json['totalBudget'] ?? json['budget']),
       dailyBudget: _toDouble(json['dailyBudget'] ?? json['budgetPerDay']),
@@ -149,7 +149,7 @@ class Campaign {
 
     void addFrom(dynamic value) {
       if (value is Map) {
-        final id = (value['id'] as num?)?.toInt();
+        final id = _toInt(value['id']);
         final name = value['name']?.toString();
         if (id != null) ids.add(id);
         if (name != null && name.isNotEmpty) names.add(name);
@@ -162,8 +162,7 @@ class Campaign {
 
     for (final segment in json['segments'] as List? ?? const []) {
       final segmentMap = segment as Map?;
-      final segmentDisplayOwnerId = (segmentMap?['displayOwnerId'] as num?)
-          ?.toInt();
+      final segmentDisplayOwnerId = _toInt(segmentMap?['displayOwnerId']);
       if (segmentDisplayOwnerId != null) {
         ids.add(segmentDisplayOwnerId);
       }
@@ -182,7 +181,7 @@ class Campaign {
     void addFrom(dynamic value) {
       if (value is! Map) return;
       final name = value['name']?.toString();
-      final id = (value['id'] as num?)?.toInt();
+      final id = _toInt(value['id']);
       if (name != null && name.isNotEmpty && id != null) {
         result[name] = id;
       }
@@ -232,13 +231,13 @@ class Campaign {
     final ids = <int>{};
 
     for (final value in json['cities'] as List? ?? const []) {
-      final id = (value as num?)?.toInt();
+      final id = value is Map ? _toInt(value['id']) : _toInt(value);
       if (id != null) {
         ids.add(id);
       }
     }
 
-    final targetCityId = ((json['targetCity'] as Map?)?['id'] as num?)?.toInt();
+    final targetCityId = _toInt((json['targetCity'] as Map?)?['id']);
     if (targetCityId != null) {
       ids.add(targetCityId);
     }
@@ -250,7 +249,7 @@ class Campaign {
     final ids = <int>{};
 
     for (final segment in json['segments'] as List? ?? const []) {
-      final id = ((segment as Map?)?['id'] as num?)?.toInt();
+      final id = _toInt((segment as Map?)?['id']);
       if (id != null) {
         ids.add(id);
       }
@@ -289,6 +288,11 @@ class Campaign {
     if (value is double) return value;
     if (value is int) return value.toDouble();
     return double.tryParse(value.toString());
+  }
+
+  static int? _toInt(dynamic value) {
+    if (value is num) return value.toInt();
+    return int.tryParse(value?.toString() ?? '');
   }
 
   bool get isActive {
