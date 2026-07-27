@@ -81,7 +81,24 @@ class BudgetsPaceScreen extends ConsumerWidget {
           final summaries =
               campaigns
                   .where((c) => c.isActive && (c.budget ?? 0) > 0)
-                  .map((c) => CampaignPaceSummary.fromCampaign(c, today))
+                  .map((c) {
+                    // Поле spent из списка кампаний часто пустое/нулевое —
+                    // как и на карточке кампании, в этом случае берём
+                    // фактический бюджет из impression-stats.
+                    final cardStats = (c.spent == null || c.spent! <= 0)
+                        ? ref
+                              .watch(campaignStatsProvider(c.id))
+                              .whenOrNull(data: (s) => s)
+                        : null;
+                    final spentOverride = (c.spent != null && c.spent! > 0)
+                        ? c.spent!
+                        : (cardStats?.factBudget ?? 0.0);
+                    return CampaignPaceSummary.fromCampaign(
+                      c,
+                      today,
+                      spentOverride: spentOverride,
+                    );
+                  })
                   .where((s) => s.totalDays > 0)
                   .toList()
                 ..sort((a, b) => a.pacePct.compareTo(b.pacePct));

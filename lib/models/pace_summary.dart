@@ -63,11 +63,15 @@ class CampaignPaceSummary {
     return diff < 0 ? 0 : diff;
   }
 
-  factory CampaignPaceSummary.fromCampaign(Campaign campaign, DateTime today) {
+  factory CampaignPaceSummary.fromCampaign(
+    Campaign campaign,
+    DateTime today, {
+    double? spentOverride,
+  }) {
     final start = _parseDate(campaign.startDate);
     final end = _parseDate(campaign.endDate);
     final budget = campaign.budget ?? 0;
-    final spent = campaign.spent ?? 0;
+    final spent = spentOverride ?? (campaign.spent ?? 0);
 
     if (start == null || end == null || budget <= 0) {
       return CampaignPaceSummary(
