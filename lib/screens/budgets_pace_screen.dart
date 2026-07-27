@@ -12,6 +12,7 @@ final _fmtRub = NumberFormat.currency(
   decimalDigits: 0,
 );
 final _fmtDate = DateFormat('dd.MM.yyyy');
+final _fmtHours = NumberFormat('#,##0.#', 'ru_RU');
 
 Color _statusColor(PaceStatus status) {
   switch (status) {
@@ -223,9 +224,35 @@ class BudgetsPaceScreen extends ConsumerWidget {
         ),
         DataCell(Text(_fmtRub.format(s.remainingBudget))),
         DataCell(Text('${s.daysLeft}')),
-        DataCell(Text(_fmtRub.format(s.dailyLimit))),
-        DataCell(Text(_fmtRub.format(s.hourlyLimit))),
+        DataCell(
+          Tooltip(
+            message: s.scheduleKnown
+                ? 'Остаток ÷ ${s.broadcastDaysLeft} дн. вещания по расписанию'
+                : 'Расписание не задано — остаток ÷ ${s.daysLeft} календарных дн.',
+            child: _limitText(_fmtRub.format(s.dailyLimit), s.scheduleKnown),
+          ),
+        ),
+        DataCell(
+          Tooltip(
+            message: s.scheduleKnown
+                ? 'Остаток ÷ ${_fmtHours.format(s.broadcastHoursLeft)} ч вещания, '
+                      'оставшихся до конца кампании'
+                : 'Расписание не задано — считаем круглые сутки '
+                      '(${_fmtHours.format(s.broadcastHoursLeft)} ч)',
+            child: _limitText(_fmtRub.format(s.hourlyLimit), s.scheduleKnown),
+          ),
+        ),
       ],
+    );
+  }
+
+  /// Без расписания лимит посчитан из круглых суток — помечаем звёздочкой,
+  /// чтобы такую цифру не принимали за точный расчёт по графику вещания.
+  Widget _limitText(String value, bool scheduleKnown) {
+    if (scheduleKnown) return Text(value);
+    return Text(
+      '$value*',
+      style: const TextStyle(color: kTextSecondary),
     );
   }
 }
