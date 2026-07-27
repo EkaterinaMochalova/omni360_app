@@ -435,10 +435,19 @@ class CampaignStats {
 
   factory CampaignStats.fromImpressionStats(Map<String, dynamic> json) {
     final reserved = json['reservedBudgetStat'] as Map?;
+    final customer = json['customerStats'] as Map?;
     // otsCount может быть 0 для FLEX_GUARANTEED — берём из reservedBudgetStat
     final planOts = _n(json['otsCount']) > 0
         ? _n(json['otsCount'])
         : _n(reserved?['ots']);
+    // totalBudgetShowed приходит пустым для части кампаний, тогда реальная
+    // сумма лежит в customerStats.budgetShowed — та же цепочка, что уже
+    // используется в сервисном дашборде (_fetchCampaignTotalSpent).
+    final factBudget = _firstPositive([
+      json['totalBudgetShowed'],
+      customer?['budgetShowed'],
+      json['dailyBudgetShowed'],
+    ]);
     // factOts: otsCountShowed или dailyOtsShowed * дней
     final factOts = _n(json['otsCountShowed']) > 0
         ? _n(json['otsCountShowed'])
@@ -454,7 +463,7 @@ class CampaignStats {
           ? _n(json['dailyBudget'])
           : _n(reserved?['dailyBudget']),
       planOts: planOts,
-      factBudget: _n(json['totalBudgetShowed']),
+      factBudget: factBudget,
       factDailyBudget: _n(json['dailyBudgetShowed']),
       factOts: factOts,
       factExits: _n(json['totalCountShowed']).toInt(),
@@ -489,6 +498,16 @@ class CampaignStats {
     if (v == null) return 0;
     if (v is num) return v.toDouble();
     return double.tryParse(v.toString()) ?? 0;
+  }
+
+  /// Первое положительное значение из списка кандидатов. Именно положительное,
+  /// а не первое не-null: бэкенд отдаёт часть полей нулями, а не пропускает их.
+  static double _firstPositive(List<dynamic> candidates) {
+    for (final candidate in candidates) {
+      final value = _n(candidate);
+      if (value > 0) return value;
+    }
+    return 0;
   }
 
   bool get hasData => factBudget > 0 || factOts > 0 || factExits > 0;

@@ -111,7 +111,22 @@ final campaignStatsProvider = FutureProvider.family<CampaignStats, String>((
     );
     final data = response.data;
     if (data is Map<String, dynamic>) {
-      return CampaignStats.fromImpressionStats(data);
+      final stats = CampaignStats.fromImpressionStats(data);
+      if (stats.factBudget <= 0) {
+        // Диагностика: факт по бюджету не нашёлся ни в одном из ожидаемых
+        // полей — печатаем, что реально пришло, чтобы не гадать.
+        final customer = data['customerStats'];
+        // ignore: avoid_print
+        print(
+          '[impression-stats $id] factBudget=0 '
+          'totalBudgetShowed=${data['totalBudgetShowed']} '
+          'dailyBudgetShowed=${data['dailyBudgetShowed']} '
+          'customerStats=${customer is Map ? customer.keys.toList() : customer} '
+          'budgetShowed=${customer is Map ? customer['budgetShowed'] : null} '
+          'keys=${data.keys.toList()}',
+        );
+      }
+      return stats;
     }
   } on DioException catch (e) {
     // ignore: avoid_print
