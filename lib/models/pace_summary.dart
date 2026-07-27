@@ -29,9 +29,14 @@ class CampaignPaceSummary {
   /// Дни, в которые кампания реально вещает, до конца срока включительно.
   final int broadcastDaysLeft;
 
-  /// Задано ли у кампании расписание. Если нет — лимиты считаны из круглых
-  /// суток, и это стоит показать пользователю, а не выдавать за точный расчёт.
-  final bool scheduleKnown;
+  /// Удалось ли выяснить расписание. false — данные не загрузились, и лимиты
+  /// посчитаны наугад из круглых суток; это надо показать пользователю.
+  final bool scheduleResolved;
+
+  /// Есть ли у кампании ограничения по времени. false при
+  /// [scheduleResolved] == true означает «идёт круглые сутки» — это
+  /// достоверный расчёт, а не отсутствие данных.
+  final bool hasTimeRestrictions;
 
   const CampaignPaceSummary({
     required this.id,
@@ -49,7 +54,8 @@ class CampaignPaceSummary {
     required this.hourlyLimit,
     this.broadcastHoursLeft = 0,
     this.broadcastDaysLeft = 0,
-    this.scheduleKnown = false,
+    this.scheduleResolved = false,
+    this.hasTimeRestrictions = false,
   });
 
   double get pctSpent => budget <= 0 ? 0 : spent / budget;
@@ -82,8 +88,9 @@ class CampaignPaceSummary {
     DateTime today, {
     double? spentOverride,
     // Расписание из детального ответа: в списочном timeSettings нет, поэтому
-    // экран догружает его отдельно и передаёт сюда.
-    List<TimeSlot>? scheduleOverride,
+    // экран догружает его отдельно и передаёт сюда. null — загрузить не
+    // удалось (это не то же самое, что расписание без ограничений).
+    BroadcastSchedule? schedule,
   }) {
     final start = _parseDate(campaign.startDate);
     final end = _parseDate(campaign.endDate);
@@ -120,8 +127,8 @@ class CampaignPaceSummary {
 
     // Остаток вещания до конца кампании: складываем фактическую длительность
     // слотов по каждому дню (за сегодня — только ещё не прошедшее время).
-    final schedule = scheduleOverride ?? campaign.timeSettings;
-    final left = broadcastHoursAndDays(schedule, today, end);
+    final slots = schedule?.slots ?? campaign.timeSettings;
+    final left = broadcastHoursAndDays(slots, today, end);
     final broadcastHoursLeft = left.hours;
     final broadcastDaysLeft = left.days;
 
@@ -138,7 +145,8 @@ class CampaignPaceSummary {
     return CampaignPaceSummary(
       broadcastHoursLeft: broadcastHoursLeft,
       broadcastDaysLeft: broadcastDaysLeft,
-      scheduleKnown: hasSchedule(schedule),
+      scheduleResolved: schedule != null || hasSchedule(campaign.timeSettings),
+      hasTimeRestrictions: hasSchedule(slots),
       id: campaign.id,
       name: campaign.name,
       startDate: start,

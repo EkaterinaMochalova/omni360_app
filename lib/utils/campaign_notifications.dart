@@ -35,24 +35,25 @@ bool isCampaignCompleted(Campaign campaign) =>
 /// Вещала ли кампания непрерывно весь последний час.
 ///
 /// [schedule] — расписание из детального ответа: в списочном `timeSettings`
-/// нет, а без него раньше кампания считалась активной круглосуточно, и
-/// «Нет показов последний час» приходило ночью, когда она законно молчит.
-/// Если расписание неизвестно, возвращаем false: пропущенное уведомление
-/// лучше ложной тревоги в три часа ночи.
+/// нет, а без него кампания считалась активной круглосуточно, и «Нет показов
+/// последний час» приходило ночью, когда она законно молчит.
+///
+/// null (загрузить не удалось) — возвращаем false: пропущенное уведомление
+/// лучше ложной тревоги в три часа ночи. А вот пустое расписание — это
+/// «ограничений по времени нет», кампания вещает круглые сутки, и уведомление
+/// работать должно.
 bool wasCampaignActiveForLastHour(
   Campaign campaign, [
   DateTime? now,
-  List<TimeSlot>? schedule,
+  BroadcastSchedule? schedule,
 ]) {
   final end = now ?? DateTime.now();
   if (!campaign.isActive || campaign.isNotOnSchedule) return false;
-
-  final slots = schedule ?? campaign.timeSettings;
-  if (!hasSchedule(slots)) return false;
+  if (schedule == null) return false;
 
   for (var minute = 1; minute <= 60; minute++) {
     final probe = end.subtract(Duration(minutes: minute));
-    if (!_isCampaignActiveAt(campaign, probe, slots)) {
+    if (!_isCampaignActiveAt(campaign, probe, schedule.slots)) {
       return false;
     }
   }

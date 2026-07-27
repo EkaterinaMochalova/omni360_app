@@ -98,12 +98,12 @@ class BudgetsPaceScreen extends ConsumerWidget {
                     // детального, иначе лимиты считаются от круглых суток.
                     final schedule = ref
                         .watch(campaignScheduleProvider(c.id))
-                        .whenOrNull(data: (slots) => slots);
+                        .whenOrNull(data: (value) => value);
                     return CampaignPaceSummary.fromCampaign(
                       c,
                       today,
                       spentOverride: spentOverride,
-                      scheduleOverride: schedule,
+                      schedule: schedule,
                     );
                   })
                   .where((s) => s.totalDays > 0)
@@ -232,33 +232,51 @@ class BudgetsPaceScreen extends ConsumerWidget {
         DataCell(Text('${s.daysLeft}')),
         DataCell(
           Tooltip(
-            message: s.scheduleKnown
-                ? 'Остаток ÷ ${s.broadcastDaysLeft} дн. вещания по расписанию'
-                : 'Расписание не задано — остаток ÷ ${s.daysLeft} календарных дн.',
-            child: _limitText(_fmtRub.format(s.dailyLimit), s.scheduleKnown),
+            message: _limitHint(
+              s,
+              'Остаток ÷ ${s.broadcastDaysLeft} дн. вещания',
+              'Остаток ÷ ${s.broadcastDaysLeft} дн. (кампания идёт круглосуточно)',
+              'Остаток ÷ ${s.daysLeft} календарных дн.',
+            ),
+            child: _limitText(_fmtRub.format(s.dailyLimit), s.scheduleResolved),
           ),
         ),
         DataCell(
           Tooltip(
-            message: s.scheduleKnown
-                ? 'Остаток ÷ ${_fmtHours.format(s.broadcastHoursLeft)} ч вещания, '
-                      'оставшихся до конца кампании'
-                : 'Расписание не задано — считаем круглые сутки '
-                      '(${_fmtHours.format(s.broadcastHoursLeft)} ч)',
-            child: _limitText(_fmtRub.format(s.hourlyLimit), s.scheduleKnown),
+            message: _limitHint(
+              s,
+              'Остаток ÷ ${_fmtHours.format(s.broadcastHoursLeft)} ч вещания '
+                  'по расписанию, оставшихся до конца кампании',
+              'Остаток ÷ ${_fmtHours.format(s.broadcastHoursLeft)} ч, оставшихся '
+                  'до конца кампании: ограничений по времени нет, кампания идёт '
+                  'круглосуточно',
+              'Расписание не загрузилось — считаем круглые сутки '
+                  '(${_fmtHours.format(s.broadcastHoursLeft)} ч)',
+            ),
+            child: _limitText(_fmtRub.format(s.hourlyLimit), s.scheduleResolved),
           ),
         ),
       ],
     );
   }
 
-  /// Без расписания лимит посчитан из круглых суток — помечаем звёздочкой,
-  /// чтобы такую цифру не принимали за точный расчёт по графику вещания.
-  Widget _limitText(String value, bool scheduleKnown) {
-    if (scheduleKnown) return Text(value);
-    return Text(
-      '$value*',
-      style: const TextStyle(color: kTextSecondary),
-    );
+  /// Три разных случая, которые раньше сваливались в один: есть расписание,
+  /// расписания нет по факту (круглосуточно — это достоверный расчёт), и
+  /// расписание не удалось загрузить (вот тут цифре верить нельзя).
+  String _limitHint(
+    CampaignPaceSummary s,
+    String restricted,
+    String roundTheClock,
+    String unresolved,
+  ) {
+    if (!s.scheduleResolved) return unresolved;
+    return s.hasTimeRestrictions ? restricted : roundTheClock;
+  }
+
+  /// Звёздочка — только когда расписание не загрузилось. Кампания без
+  /// ограничений по времени считается корректно, помечать её незачем.
+  Widget _limitText(String value, bool scheduleResolved) {
+    if (scheduleResolved) return Text(value);
+    return Text('$value*', style: const TextStyle(color: kTextSecondary));
   }
 }

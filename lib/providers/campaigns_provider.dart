@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:dio/dio.dart';
 import '../api/omni360_client.dart';
 import '../models/campaign.dart';
+import '../utils/broadcast_schedule.dart';
 
 // --- Campaigns list ---
 
@@ -122,66 +123,71 @@ final campaignDetailProvider = FutureProvider.family<Campaign, String>((
 /// Riverpod кеширует результат по id, так что на экран это один запрос на
 /// кампанию — расписание меняется редко, перезапрашивать его незачем.
 final campaignScheduleProvider =
-    FutureProvider.family<List<TimeSlot>?, String>((ref, id) async {
+    FutureProvider.family<BroadcastSchedule?, String>((ref, id) async {
       try {
         final response = await Omni360Client().dio.get(
           '/api/v1.0/clients/campaigns/$id',
         );
         final data = response.data;
-        if (data is! Map) {
-          // ignore: avoid_print
-          print('[schedule $id] ответ не объект: ${data.runtimeType}');
-          return null;
-        }
+        if (data is! Map) return null;
 
-        // Пробуем несколько имён: точное имя поля в детальном ответе не
-        // проверено, а молчаливый null отсюда неотличим от «расписания нет».
-        const candidates = [
-          'timeSettings',
-          'timeSetting',
-          'timeSlots',
-          'schedule',
-          'timeTargeting',
-        ];
-        final key = candidates.firstWhere(
-          (k) => data[k] is List && (data[k] as List).isNotEmpty,
-          orElse: () => '',
-        );
-        if (key.isEmpty) {
-          // ignore: avoid_print
-          print(
-            '[schedule $id] расписание не найдено. '
-            'timeSettings=${data['timeSettings']} | ключи ответа: ${data.keys.toList()}',
-          );
-          return null;
-        }
-
+        final raw = data['timeSettings'];
         // Через whereType<Map>() + cast, а не прямой каст к
         // Map<String, dynamic>: вложенные объекты не всегда приходят с этим
-        // типом, и строгий фильтр молча выбрасывал бы все слоты.
-        final slots = (data[key] as List)
-            .whereType<Map>()
-            .map((e) => TimeSlot.fromJson(e.cast<String, dynamic>()))
-            .toList();
-        final first = slots.isEmpty
-            ? 'нет'
-            : 'день ${slots.first.dayOfWeek}, '
-                  '${slots.first.relativeStartTime}-${slots.first.relativeEndTime} сек';
-        // ignore: avoid_print
-        print(
-          '[schedule $id] из "$key" разобрано слотов: ${slots.length}; '
-          'первый: $first; сырой первый элемент: ${(data[key] as List).first}',
-        );
-        return slots.isEmpty ? null : slots;
+        // типом, и строгий фильтр молча выбросил бы все слоты.
+        final slots = raw is List
+            ? raw
+                  .whereType<Map>()
+                  .map((e) => TimeSlot.fromJson(e.cast<String, dynamic>()))
+                  .toList()
+            : <TimeSlot>[];
+
+        if (slots.isEmpty) {
+          // Пустой timeSettings — штатная ситуация (нет таргетинга по
+          // времени). Разово подсматриваем, не лежит ли расписание в
+          // сегментах: у части кампаний таргетинг задают на их уровне.
+          final segments = data['segments'];
+          final firstSegment =
+              (segments is List && segments.isNotEmpty && segments.first is Map)
+              ? segments.first as Map
+              : null;
+          // ignore: avoid_print
+          print(
+            '[schedule $id] timeSettings пустой → круглые сутки. '
+            'сегментов=${segments is List ? segments.length : 0} '
+            'ключи сегмента=${firstSegment?.keys.toList()} '
+            'время в сегменте: ${_timeishFields(firstSegment)} | '
+            'budgetConfig=${data['budgetConfig']} '
+            'maxHourly=${data['maxHourlyImpressionsCount']}',
+          );
+        }
+
+        return BroadcastSchedule(slots);
       } catch (e) {
-        // Ловим всё, а не только DioException: раньше ошибка разбора давала
-        // тот же безмолвный null, что и «расписания нет», и отладить это
-        // изнутри приложения было нельзя.
+        // Ловим всё, а не только DioException: ошибка разбора давала такой же
+        // безмолвный null, что и успешная загрузка пустого расписания.
         // ignore: avoid_print
         print('[schedule $id] ошибка загрузки/разбора: $e');
         return null;
       }
     });
+
+/// Поля, похожие на временные, — чтобы найти таргетинг по времени, если он
+/// задан не на уровне кампании.
+String _timeishFields(Map? source) {
+  if (source == null) return 'нет сегмента';
+  final hits = <String>[];
+  source.forEach((key, value) {
+    final name = key.toString().toLowerCase();
+    if (name.contains('time') ||
+        name.contains('schedule') ||
+        name.contains('hour') ||
+        name.contains('day')) {
+      hits.add('$key=$value');
+    }
+  });
+  return hits.isEmpty ? 'нет' : hits.join(' ');
+}
 
 // --- Campaign stats via GET /impression-stats ---
 
