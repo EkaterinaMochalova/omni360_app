@@ -7,7 +7,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 /// проекте flutter_secure_storage (та же обёртка, что и для
 /// campaign_analytics_dashboard_prefs), без новой зависимости.
 class LocalOrderStore {
-  LocalOrderStore._();
+  const LocalOrderStore._();
 
   static const LocalOrderStore instance = LocalOrderStore._();
 
