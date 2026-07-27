@@ -128,16 +128,57 @@ final campaignScheduleProvider =
           '/api/v1.0/clients/campaigns/$id',
         );
         final data = response.data;
-        if (data is! Map<String, dynamic>) return null;
-        final raw = data['timeSettings'];
-        if (raw is! List) return null;
-        return raw
-            .whereType<Map<String, dynamic>>()
-            .map(TimeSlot.fromJson)
+        if (data is! Map) {
+          // ignore: avoid_print
+          print('[schedule $id] ответ не объект: ${data.runtimeType}');
+          return null;
+        }
+
+        // Пробуем несколько имён: точное имя поля в детальном ответе не
+        // проверено, а молчаливый null отсюда неотличим от «расписания нет».
+        const candidates = [
+          'timeSettings',
+          'timeSetting',
+          'timeSlots',
+          'schedule',
+          'timeTargeting',
+        ];
+        final key = candidates.firstWhere(
+          (k) => data[k] is List && (data[k] as List).isNotEmpty,
+          orElse: () => '',
+        );
+        if (key.isEmpty) {
+          // ignore: avoid_print
+          print(
+            '[schedule $id] расписание не найдено. '
+            'timeSettings=${data['timeSettings']} | ключи ответа: ${data.keys.toList()}',
+          );
+          return null;
+        }
+
+        // Через whereType<Map>() + cast, а не прямой каст к
+        // Map<String, dynamic>: вложенные объекты не всегда приходят с этим
+        // типом, и строгий фильтр молча выбрасывал бы все слоты.
+        final slots = (data[key] as List)
+            .whereType<Map>()
+            .map((e) => TimeSlot.fromJson(e.cast<String, dynamic>()))
             .toList();
-      } on DioException {
-        // Расписание неизвестно — вызывающий код обязан это учесть, а не
-        // молча считать, что кампания вещает круглые сутки.
+        final first = slots.isEmpty
+            ? 'нет'
+            : 'день ${slots.first.dayOfWeek}, '
+                  '${slots.first.relativeStartTime}-${slots.first.relativeEndTime} сек';
+        // ignore: avoid_print
+        print(
+          '[schedule $id] из "$key" разобрано слотов: ${slots.length}; '
+          'первый: $first; сырой первый элемент: ${(data[key] as List).first}',
+        );
+        return slots.isEmpty ? null : slots;
+      } catch (e) {
+        // Ловим всё, а не только DioException: раньше ошибка разбора давала
+        // тот же безмолвный null, что и «расписания нет», и отладить это
+        // изнутри приложения было нельзя.
+        // ignore: avoid_print
+        print('[schedule $id] ошибка загрузки/разбора: $e');
         return null;
       }
     });
