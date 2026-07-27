@@ -1,10 +1,20 @@
 import 'package:flutter/material.dart';
 
+const double _kMinWidthFraction = 0.22;
+const double _kMinTileWidth = 220;
+
 /// Сетка с переносом (аналог CSS flex-wrap) с ручным drag-and-drop
 /// переупорядочиванием элементов через ручку-«грипп» слева. Ширина элемента
 /// считается по доступной ширине контейнера: обычные элементы занимают одну
 /// колонку, "широкие" (см. [isWide]) — две, если позволяет место. На узких
 /// экранах (одна колонка) всё естественным образом складывается в список.
+///
+/// Если задан [widthFractionOf] (и [onResize]) — вместо фиксированных
+/// narrow/wide колонок используется непрерывный ресайз: у каждой плашки
+/// появляется ручка в правом нижнем углу, перетаскивание которой плавно
+/// меняет долю доступной ширины, которую занимает плашка (как ресайз виджетов
+/// на дашборде в Яндекс Трекере). Высота при этом остаётся по содержимому —
+/// не резервируем/не обрезаем контент карточек под произвольную высоту.
 class ReorderableFlexWrap<T> extends StatefulWidget {
   final List<T> items;
   final String Function(T item) idOf;
@@ -14,6 +24,9 @@ class ReorderableFlexWrap<T> extends StatefulWidget {
   final double spacing;
   final double runSpacing;
   final ValueChanged<List<T>> onReorder;
+
+  final double Function(T item)? widthFractionOf;
+  final void Function(String id, double fraction)? onResize;
 
   const ReorderableFlexWrap({
     super.key,
@@ -25,6 +38,8 @@ class ReorderableFlexWrap<T> extends StatefulWidget {
     this.spacing = 14,
     this.runSpacing = 14,
     required this.onReorder,
+    this.widthFractionOf,
+    this.onResize,
   });
 
   @override
@@ -35,6 +50,9 @@ class ReorderableFlexWrap<T> extends StatefulWidget {
 class _ReorderableFlexWrapState<T> extends State<ReorderableFlexWrap<T>> {
   String? _draggedId;
   String? _dragOverId;
+
+  String? _resizingId;
+  double _resizeDeltaPx = 0;
 
   void _reorder(String draggedId, String targetId) {
     if (draggedId == targetId) return;
@@ -51,6 +69,9 @@ class _ReorderableFlexWrapState<T> extends State<ReorderableFlexWrap<T>> {
 
   @override
   Widget build(BuildContext context) {
+    final resizeEnabled =
+        widget.widthFractionOf != null && widget.onResize != null;
+
     return LayoutBuilder(
       builder: (context, constraints) {
         final maxWidth = constraints.maxWidth;
@@ -65,10 +86,28 @@ class _ReorderableFlexWrapState<T> extends State<ReorderableFlexWrap<T>> {
           runSpacing: widget.runSpacing,
           children: widget.items.map((item) {
             final id = widget.idOf(item);
-            final wide = columns > 1 && (widget.isWide?.call(item) ?? false);
-            final width = wide
-                ? columnWidth * 2 + widget.spacing
-                : columnWidth;
+            final isResizingThis = resizeEnabled && _resizingId == id;
+
+            double width;
+            double baseFraction = 1;
+            if (resizeEnabled) {
+              baseFraction = widget.widthFractionOf!(item).clamp(
+                _kMinWidthFraction,
+                1.0,
+              );
+              final liveFraction = isResizingThis
+                  ? ((baseFraction * maxWidth + _resizeDeltaPx) / maxWidth)
+                        .clamp(_kMinWidthFraction, 1.0)
+                  : baseFraction;
+              final minTileWidth = _kMinTileWidth < maxWidth
+                  ? _kMinTileWidth
+                  : maxWidth;
+              width = (liveFraction * maxWidth).clamp(minTileWidth, maxWidth);
+            } else {
+              final wide = columns > 1 && (widget.isWide?.call(item) ?? false);
+              width = wide ? columnWidth * 2 + widget.spacing : columnWidth;
+            }
+
             final isDragged = _draggedId == id;
             final isOver =
                 _dragOverId == id && _draggedId != null && _draggedId != id;
@@ -84,7 +123,9 @@ class _ReorderableFlexWrapState<T> extends State<ReorderableFlexWrap<T>> {
             );
 
             final tile = AnimatedContainer(
-              duration: const Duration(milliseconds: 150),
+              duration: isResizingThis
+                  ? Duration.zero
+                  : const Duration(milliseconds: 150),
               width: width,
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(14),
@@ -97,31 +138,78 @@ class _ReorderableFlexWrapState<T> extends State<ReorderableFlexWrap<T>> {
               ),
               child: Opacity(
                 opacity: isDragged ? 0.4 : 1,
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                child: Stack(
                   children: [
-                    Draggable<String>(
-                      data: id,
-                      feedback: Material(
-                        color: Colors.transparent,
-                        child: SizedBox(
-                          width: width,
-                          child: Opacity(opacity: 0.85, child: content),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Draggable<String>(
+                          data: id,
+                          feedback: Material(
+                            color: Colors.transparent,
+                            child: SizedBox(
+                              width: width,
+                              child: Opacity(opacity: 0.85, child: content),
+                            ),
+                          ),
+                          childWhenDragging: const Icon(
+                            Icons.drag_indicator_rounded,
+                            color: Color(0xFFBDBDBD),
+                            size: 18,
+                          ),
+                          onDragStarted: () => setState(() => _draggedId = id),
+                          onDragEnd: (_) => setState(() {
+                            _draggedId = null;
+                            _dragOverId = null;
+                          }),
+                          child: grip,
+                        ),
+                        Expanded(child: content),
+                      ],
+                    ),
+                    if (resizeEnabled)
+                      Positioned(
+                        right: 0,
+                        bottom: 0,
+                        child: MouseRegion(
+                          cursor: SystemMouseCursors.resizeLeftRight,
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onPanStart: (_) => setState(() {
+                              _resizingId = id;
+                              _resizeDeltaPx = 0;
+                            }),
+                            onPanUpdate: (details) => setState(() {
+                              _resizeDeltaPx += details.delta.dx;
+                            }),
+                            onPanEnd: (_) {
+                              final finalFraction =
+                                  ((baseFraction * maxWidth + _resizeDeltaPx) /
+                                          maxWidth)
+                                      .clamp(_kMinWidthFraction, 1.0);
+                              widget.onResize!(id, finalFraction);
+                              setState(() {
+                                _resizingId = null;
+                                _resizeDeltaPx = 0;
+                              });
+                            },
+                            child: Container(
+                              width: 20,
+                              height: 20,
+                              alignment: Alignment.bottomRight,
+                              padding: const EdgeInsets.only(
+                                bottom: 2,
+                                right: 2,
+                              ),
+                              child: const Icon(
+                                Icons.open_in_full_rounded,
+                                size: 14,
+                                color: Color(0xFFBDBDBD),
+                              ),
+                            ),
+                          ),
                         ),
                       ),
-                      childWhenDragging: const Icon(
-                        Icons.drag_indicator_rounded,
-                        color: Color(0xFFBDBDBD),
-                        size: 18,
-                      ),
-                      onDragStarted: () => setState(() => _draggedId = id),
-                      onDragEnd: (_) => setState(() {
-                        _draggedId = null;
-                        _dragOverId = null;
-                      }),
-                      child: grip,
-                    ),
-                    Expanded(child: content),
                   ],
                 ),
               ),

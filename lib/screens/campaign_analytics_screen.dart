@@ -460,6 +460,7 @@ class _Toolbar extends StatelessWidget {
 }
 
 const _kAnalyticsOrderKey = 'omni360-analytics-order';
+const _kAnalyticsWidthsKey = 'omni360-analytics-widths';
 const _kAnalyticsBlockIds = [
   'summary',
   'states',
@@ -493,11 +494,13 @@ class _AnalyticsBody extends StatefulWidget {
 
 class _AnalyticsBodyState extends State<_AnalyticsBody> {
   List<String> _order = _kAnalyticsBlockIds;
+  Map<String, double> _widths = {};
 
   @override
   void initState() {
     super.initState();
     _loadOrder();
+    _loadWidths();
   }
 
   Future<void> _loadOrder() async {
@@ -512,10 +515,24 @@ class _AnalyticsBodyState extends State<_AnalyticsBody> {
     }
   }
 
+  Future<void> _loadWidths() async {
+    final saved = await LocalOrderStore.instance.loadWidths(
+      _kAnalyticsWidthsKey,
+    );
+    if (saved != null && mounted) {
+      setState(() => _widths = saved);
+    }
+  }
+
   void _onReorder(List<_AnalyticsBlock> newOrder) {
     final ids = newOrder.map((b) => b.id).toList();
     setState(() => _order = ids);
     LocalOrderStore.instance.saveOrder(_kAnalyticsOrderKey, ids);
+  }
+
+  void _onResize(String id, double fraction) {
+    setState(() => _widths = {..._widths, id: fraction});
+    LocalOrderStore.instance.saveWidths(_kAnalyticsWidthsKey, _widths);
   }
 
   @override
@@ -695,9 +712,10 @@ class _AnalyticsBodyState extends State<_AnalyticsBody> {
       child: ReorderableFlexWrap<_AnalyticsBlock>(
         items: blocks,
         idOf: (b) => b.id,
-        isWide: (b) => b.isWide,
         onReorder: _onReorder,
         itemBuilder: (context, b) => b.child,
+        widthFractionOf: (b) => _widths[b.id] ?? (b.isWide ? 1.0 : 0.48),
+        onResize: _onResize,
       ),
     );
   }

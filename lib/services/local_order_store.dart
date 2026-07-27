@@ -47,4 +47,26 @@ class LocalOrderStore {
     merged.addAll(currentIds.where((id) => !mergedSet.contains(id)));
     return merged;
   }
+
+  /// Хранение доли ширины (0..1) на блок — для непрерывного ресайза плашек
+  /// (см. [ReorderableFlexWrap.widthFractionOf]).
+  Future<Map<String, double>?> loadWidths(String key) async {
+    final raw = await _storage.read(key: key);
+    if (raw == null) return null;
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is Map) {
+        return decoded.map(
+          (k, v) => MapEntry(k.toString(), (v as num).toDouble()),
+        );
+      }
+    } catch (_) {
+      // Игнорируем повреждённые данные — используем ширину по умолчанию.
+    }
+    return null;
+  }
+
+  Future<void> saveWidths(String key, Map<String, double> widths) {
+    return _storage.write(key: key, value: jsonEncode(widths));
+  }
 }

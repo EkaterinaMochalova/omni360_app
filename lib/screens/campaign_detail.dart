@@ -11,6 +11,7 @@ import '../widgets/stats_chart.dart';
 import '../utils/pace_alerts.dart';
 
 const _kDetailOrderKey = 'omni360-detail-order';
+const _kDetailWidthsKey = 'omni360-detail-widths';
 const _kDetailBlockIds = [
   'status',
   'dates',
@@ -35,11 +36,13 @@ class CampaignDetailScreen extends ConsumerStatefulWidget {
 
 class _CampaignDetailScreenState extends ConsumerState<CampaignDetailScreen> {
   List<String> _order = _kDetailBlockIds;
+  Map<String, double> _widths = {};
 
   @override
   void initState() {
     super.initState();
     _loadOrder();
+    _loadWidths();
   }
 
   Future<void> _loadOrder() async {
@@ -54,10 +57,22 @@ class _CampaignDetailScreenState extends ConsumerState<CampaignDetailScreen> {
     }
   }
 
+  Future<void> _loadWidths() async {
+    final saved = await LocalOrderStore.instance.loadWidths(_kDetailWidthsKey);
+    if (saved != null && mounted) {
+      setState(() => _widths = saved);
+    }
+  }
+
   void _onReorder(List<_DetailBlock> newOrder) {
     final ids = newOrder.map((b) => b.id).toList();
     setState(() => _order = ids);
     LocalOrderStore.instance.saveOrder(_kDetailOrderKey, ids);
+  }
+
+  void _onResize(String id, double fraction) {
+    setState(() => _widths = {..._widths, id: fraction});
+    LocalOrderStore.instance.saveWidths(_kDetailWidthsKey, _widths);
   }
 
   @override
@@ -167,9 +182,11 @@ class _CampaignDetailScreenState extends ConsumerState<CampaignDetailScreen> {
             child: ReorderableFlexWrap<_DetailBlock>(
               items: blocks,
               idOf: (b) => b.id,
-              isWide: (b) => b.isWide,
               onReorder: _onReorder,
               itemBuilder: (context, b) => b.child,
+              widthFractionOf: (b) =>
+                  _widths[b.id] ?? (b.isWide ? 1.0 : 0.48),
+              onResize: _onResize,
             ),
           );
         },
