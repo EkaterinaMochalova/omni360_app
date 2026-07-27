@@ -17,8 +17,12 @@ class Omni360Client {
     _dio = Dio(
       BaseOptions(
         baseUrl: _baseUrl,
-        connectTimeout: const Duration(seconds: 30),
-        receiveTimeout: const Duration(seconds: 60),
+        // На вебе (BrowserHttpClientAdapter) connectTimeout фактически задаёт
+        // полный лимит на запрос (нет отдельной фазы TCP-коннекта), поэтому
+        // именно он упирался в 30с на тяжёлых кампаниях с большим числом
+        // рекламных мест — увеличиваем запас, а не только число повторов.
+        connectTimeout: const Duration(seconds: 60),
+        receiveTimeout: const Duration(seconds: 90),
         headers: {'Content-Type': 'application/json'},
       ),
     );
