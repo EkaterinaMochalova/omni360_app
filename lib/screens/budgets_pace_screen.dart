@@ -132,6 +132,8 @@ class BudgetsPaceScreen extends ConsumerWidget {
             0.0,
             (s, c) => s + c.remainingBudget,
           );
+          final totalPlanToNow = summaries.fold(0.0, (s, c) => s + c.planToNow);
+          final totalShortfall = totalPlanToNow - totalSpent;
 
           return Padding(
             padding: const EdgeInsets.all(16),
@@ -150,6 +152,8 @@ class BudgetsPaceScreen extends ConsumerWidget {
                     DataColumn(label: Text('Факт'), numeric: true),
                     DataColumn(label: Text('% освоено'), numeric: true),
                     DataColumn(label: Text('План к сегодня'), numeric: true),
+                    DataColumn(label: Text('Сейчас: факт / план'), numeric: true),
+                    DataColumn(label: Text('Не хватает'), numeric: true),
                     DataColumn(label: Text('Темп'), numeric: true),
                     DataColumn(label: Text('Остаток'), numeric: true),
                     DataColumn(label: Text('Дней осталось'), numeric: true),
@@ -176,6 +180,26 @@ class BudgetsPaceScreen extends ConsumerWidget {
                           ),
                         ),
                         DataCell(Text(_fmtRub.format(totalPlanToDate))),
+                        DataCell(
+                          Text(
+                            '${_fmtRub.format(totalSpent)} / '
+                            '${_fmtRub.format(totalPlanToNow)}',
+                          ),
+                        ),
+                        DataCell(
+                          Text(
+                            totalShortfall.abs() < 1
+                                ? '—'
+                                : '${totalShortfall > 0 ? '' : '+'}'
+                                      '${_fmtRub.format(totalShortfall.abs())}',
+                            style: TextStyle(
+                              color: totalShortfall > 0
+                                  ? Colors.red
+                                  : const Color(0xFF2E7D32),
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
                         DataCell(
                           Text(
                             totalPlanToDate == 0
@@ -216,6 +240,17 @@ class BudgetsPaceScreen extends ConsumerWidget {
         DataCell(Text(_fmtRub.format(s.spent))),
         DataCell(Text('${(s.pctSpent * 100).toStringAsFixed(1)}%')),
         DataCell(Text(_fmtRub.format(s.planToDate))),
+        DataCell(
+          Tooltip(
+            message:
+                'План на текущий момент — по доле уже прошедшего эфирного '
+                'времени, а не по целым дням',
+            child: Text(
+              '${_fmtRub.format(s.spent)} / ${_fmtRub.format(s.planToNow)}',
+            ),
+          ),
+        ),
+        DataCell(_shortfallText(s)),
         DataCell(
           Tooltip(
             message: _statusLabel(s.status),
@@ -261,6 +296,21 @@ class BudgetsPaceScreen extends ConsumerWidget {
           ),
         ),
       ],
+    );
+  }
+
+  /// Недобор до плана на текущий момент. Перелив показываем со знаком плюс и
+  /// зелёным — это не ошибка, а обгон плана.
+  Widget _shortfallText(CampaignPaceSummary s) {
+    final diff = s.shortfallNow;
+    if (diff.abs() < 1) return const Text('—');
+    final behind = diff > 0;
+    return Text(
+      '${behind ? '' : '+'}${_fmtRub.format(behind ? diff : -diff)}',
+      style: TextStyle(
+        color: behind ? Colors.red : const Color(0xFF2E7D32),
+        fontWeight: FontWeight.w600,
+      ),
     );
   }
 

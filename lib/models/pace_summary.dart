@@ -22,6 +22,10 @@ class CampaignPaceSummary {
   final double dailyLimit;
   final double hourlyLimit;
 
+  /// Сколько по плану должно быть потрачено к текущему моменту — по доле
+  /// прошедшего эфирного времени, а не по целым дням.
+  final double planToNow;
+
   /// Часы вещания, оставшиеся до конца кампании (с учётом расписания и того,
   /// что часть сегодняшнего дня уже прошла). 0 — если вещать больше негде.
   final double broadcastHoursLeft;
@@ -52,6 +56,7 @@ class CampaignPaceSummary {
     required this.paceAmount,
     required this.dailyLimit,
     required this.hourlyLimit,
+    this.planToNow = 0,
     this.broadcastHoursLeft = 0,
     this.broadcastDaysLeft = 0,
     this.scheduleResolved = false,
@@ -64,6 +69,12 @@ class CampaignPaceSummary {
   double get pacePct => planToDate <= 0 ? 0 : spent / planToDate;
 
   double get remainingBudget => budget - spent;
+
+  /// Сколько не хватает до плана прямо сейчас. Отрицательное — перелив.
+  double get shortfallNow => planToNow - spent;
+
+  /// Темп относительно плана на текущий момент. 1.0 = ровно по плану.
+  double get pacePctNow => planToNow <= 0 ? 0 : spent / planToNow;
 
   PaceStatus get status {
     if (pacePct < 0.70) return PaceStatus.red;
@@ -142,7 +153,19 @@ class CampaignPaceSummary {
         ? remaining / broadcastHoursLeft
         : 0.0;
 
+    // План «на сейчас» — по доле уже прошедшего эфирного времени, а не по
+    // целым дням: «План к сегодня» скачет ступенькой в полночь и весь день
+    // показывает, что мы отстаём, хотя эфир ещё впереди.
+    final spentAll = broadcastHoursAndDays(slots, start, end, fromTimeOfDay: false);
+    final totalBroadcast = spentAll.hours;
+    final elapsedBroadcast = (totalBroadcast - broadcastHoursLeft)
+        .clamp(0.0, totalBroadcast);
+    final planToNow = totalBroadcast > 0
+        ? budget * (elapsedBroadcast / totalBroadcast)
+        : planToDate;
+
     return CampaignPaceSummary(
+      planToNow: planToNow,
       broadcastHoursLeft: broadcastHoursLeft,
       broadcastDaysLeft: broadcastDaysLeft,
       scheduleResolved: schedule != null || hasSchedule(campaign.timeSettings),
