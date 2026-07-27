@@ -302,11 +302,17 @@ class _PlanFactCard extends StatelessWidget {
 
     final s = stats; // non-nullable local for null-safety
 
-    // ПЛАН всегда из данных кампании (detail endpoint)
-    // impression-stats используем только для ФАКТ
-    final planBudget = campaign.budget;
-    final planDaily = campaign.dailyBudget;
-    final planOts = campaign.ots;
+    // ПЛАН приоритетно берём из /impression-stats (planBudget/planDailyBudget/
+    // planOts) — там он есть даже для кампаний, у которых budget/dailyBudget/
+    // ots не заполнены на уровне самой кампании (detail endpoint). Данные
+    // кампании — запасной вариант, если в статистике плана нет.
+    final planBudget = (s != null && s.planBudget > 0)
+        ? s.planBudget
+        : campaign.budget;
+    final planDaily = (s != null && s.planDailyBudget > 0)
+        ? s.planDailyBudget
+        : campaign.dailyBudget;
+    final planOts = (s != null && s.planOts > 0) ? s.planOts : campaign.ots;
 
     // Бюджет
     if (planBudget != null && planBudget > 0) {
@@ -572,18 +578,32 @@ class _DetailedStatsCard extends StatelessWidget {
         ? (campaign.exits! / 14)
         : null;
 
+    // /impression-stats (CampaignStats) — источник истины для плана: карточка
+    // кампании (Campaign.budget/dailyBudget/ots) не всегда его заполняет,
+    // а /impression-stats уже парсится в planBudget/planDailyBudget/planOts.
+    // Используем стату в приоритете, поле кампании — как запасной вариант.
+    double? firstPositive(double? a, double? b) {
+      if (a != null && a > 0) return a;
+      if (b != null && b > 0) return b;
+      return null;
+    }
+
+    final planBudget = firstPositive(s?.planBudget, campaign.budget);
+    final planDailyBudget = firstPositive(s?.planDailyBudget, campaign.dailyBudget);
+    final planOts = firstPositive(s?.planOts, campaign.ots);
+
     final rows = <_DetailedStatRowData>[
       _DetailedStatRowData(
         label: 'Бюджет общий',
-        plan: rub(campaign.budget),
+        plan: rub(planBudget),
         fact: rub(s?.factBudget),
-        ratio: _ratio(campaign.budget, s?.factBudget),
+        ratio: _ratio(planBudget, s?.factBudget),
       ),
       _DetailedStatRowData(
         label: 'Бюджет в день',
-        plan: rub(campaign.dailyBudget),
+        plan: rub(planDailyBudget),
         fact: rub(s?.factDailyBudget),
-        ratio: _ratio(campaign.dailyBudget, s?.factDailyBudget),
+        ratio: _ratio(planDailyBudget, s?.factDailyBudget),
       ),
       _DetailedStatRowData(
         label: 'Бюджет в час',
@@ -593,9 +613,9 @@ class _DetailedStatsCard extends StatelessWidget {
       ),
       _DetailedStatRowData(
         label: 'OTS общий',
-        plan: num(campaign.ots),
+        plan: num(planOts),
         fact: num(s?.factOts),
-        ratio: _ratio(campaign.ots, s?.factOts),
+        ratio: _ratio(planOts, s?.factOts),
       ),
       _DetailedStatRowData(
         label: 'OTS в час',
