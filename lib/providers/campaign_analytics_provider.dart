@@ -302,7 +302,18 @@ class CampaignAnalyticsController
       if (query.inventoryGid.isNotEmpty) 'inventoryGid': query.inventoryGid,
     };
 
+    // Порядок вариантов подобран по факту: локальный ISO-формат (T-разделитель,
+    // без смещения таймзоны) — единственный, который бэкенд стабильно
+    // принимает в остальных местах приложения (см. _fetchImpressionsRows в
+    // service_dashboard_provider.dart), поэтому пробуем его первым, чтобы не
+    // тратить round-trip'ы на заведомо отклоняемые варианты и не создавать
+    // лишнюю нагрузку на и так нестабильный прокси/бэкенд.
     final attempts = <Map<String, dynamic>>[
+      {
+        ...baseParams,
+        'localStartDate': _formatLocalIsoDateTime(query.start),
+        'localEndDate': _formatLocalIsoDateTime(query.end),
+      },
       {
         ...baseParams,
         'localStartDate': _formatSpaceDateTime(query.start.toLocal()),
@@ -315,36 +326,43 @@ class CampaignAnalyticsController
       },
       {
         ...baseParams,
-        'localStartDate': _formatLocalIsoDateTime(query.start),
-        'localEndDate': _formatLocalIsoDateTime(query.end),
-      },
-      {
-        ...baseParams,
         'startDate': query.start.toUtc().toIso8601String(),
         'endDate': query.end.toUtc().toIso8601String(),
       },
       baseParams,
     ];
 
-    DioException? lastBadRequest;
+    DioException? lastError;
 
     for (final params in attempts) {
-      try {
-        return await _client.dio.get(
-          '/api/v1.0/clients/campaigns/$campaignId/impressions',
-          queryParameters: params,
-          options: Options(listFormat: ListFormat.multi),
-        );
-      } on DioException catch (e) {
-        if (e.response?.statusCode == 400) {
-          lastBadRequest = e;
-          continue;
+      for (var attempt = 0; attempt < 2; attempt++) {
+        try {
+          return await _client.dio.get(
+            '/api/v1.0/clients/campaigns/$campaignId/impressions',
+            queryParameters: params,
+            options: Options(listFormat: ListFormat.multi),
+          );
+        } on DioException catch (e) {
+          lastError = e;
+          final status = e.response?.statusCode ?? 0;
+          final isRetryableStatus = status == 502 || status == 503 || status == 504;
+          if (isRetryableStatus && attempt == 0) {
+            // Временный сбой прокси/бэкенда — не в формате параметров дело,
+            // даём один шанс на повтор прежде чем переходить к следующему
+            // варианту (как уже сделано для этого же эндпоинта в
+            // service_dashboard_provider.dart).
+            await Future<void>.delayed(const Duration(milliseconds: 250));
+            continue;
+          }
+          if (status == 400) {
+            break; // переходим к следующему варианту параметров
+          }
+          rethrow;
         }
-        rethrow;
       }
     }
 
-    throw lastBadRequest ??
+    throw lastError ??
         StateError('Failed to load campaign impressions for $campaignId');
   }
 
@@ -368,18 +386,24 @@ class CampaignAnalyticsController
     );
     final allRecords = <CampaignImpressionRecord>[...firstPage.content];
 
-    if (firstPage.totalPages > 1) {
-      final futures = <Future<dynamic>>[];
-      for (var pageIndex = 1; pageIndex < firstPage.totalPages; pageIndex++) {
-        futures.add(
+    // Страницы тянем ограниченными пачками, а не все разом: прокси/бэкенд и
+    // так периодически отдаёт 502 под нагрузкой (см. isRetryableStatus в
+    // _fetchImpressionsWithFallback), не стоит усугублять это залпом из
+    // десятков параллельных запросов при большом объёме показов.
+    const chunkSize = 6;
+    for (
+      var start = 1;
+      start < firstPage.totalPages;
+      start += chunkSize
+    ) {
+      final end = (start + chunkSize).clamp(0, firstPage.totalPages);
+      final chunkResponses = await Future.wait([
+        for (var pageIndex = start; pageIndex < end; pageIndex++)
           _fetchImpressionsWithFallback(
             aggregateQuery.copyWith(page: pageIndex),
           ),
-        );
-      }
-
-      final responses = await Future.wait(futures);
-      for (final response in responses) {
+      ]);
+      for (final response in chunkResponses) {
         final page = CampaignImpressionsPage.fromJson(
           response.data as Map<String, dynamic>,
         );
