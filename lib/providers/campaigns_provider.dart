@@ -160,9 +160,11 @@ final campaignPhotoCoverageProvider =
       );
 
       final rows = <Map<String, dynamic>>[];
-      var page = 0;
       const size = 500;
-      while (true) {
+      const maxPages = 20;
+      const waveSize = 3;
+
+      Future<List<Map<String, dynamic>>?> fetchPage(int page) async {
         final params = <String, dynamic>{
           'page': page,
           'size': size,
@@ -175,13 +177,33 @@ final campaignPhotoCoverageProvider =
           options: Options(listFormat: ListFormat.multi),
         );
         final data = resp.data;
-        if (data is! List) break;
-        final chunk = data.whereType<Map<String, dynamic>>().toList();
-        if (chunk.isEmpty) break;
-        rows.addAll(chunk);
-        if (chunk.length < size) break;
-        page++;
-        if (page >= 20) break;
+        if (data is! List) return null;
+        return data.whereType<Map<String, dynamic>>().toList();
+      }
+
+      // Страницы неизвестного общего числа — берём их волнами по несколько
+      // штук параллельно вместо строго последовательного перебора: тяжёлые
+      // кампании иначе накапливают задержку до 20 круговых обращений подряд
+      // и упираются в клиентский таймаут, хотя сам бэкенд не перегружен.
+      var page = 0;
+      var reachedEnd = false;
+      while (!reachedEnd && page < maxPages) {
+        final wavePages = [
+          for (var i = 0; i < waveSize && page + i < maxPages; i++) page + i,
+        ];
+        final waveResults = await Future.wait(wavePages.map(fetchPage));
+        for (final chunk in waveResults) {
+          if (chunk == null || chunk.isEmpty) {
+            reachedEnd = true;
+            break;
+          }
+          rows.addAll(chunk);
+          if (chunk.length < size) {
+            reachedEnd = true;
+            break;
+          }
+        }
+        page += wavePages.length;
       }
 
       String sideKeyFromRow(Map<String, dynamic> row) {
