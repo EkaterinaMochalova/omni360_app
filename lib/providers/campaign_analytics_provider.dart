@@ -72,12 +72,18 @@ class CampaignAnalyticsState {
   final CampaignAnalyticsDashboardPrefs prefs;
   final CampaignAnalyticsQuery query;
 
+  /// Все показы за выбранный период (все страницы), собранные попутно с
+  /// расчётом [aggregate] — используются отчётами по ставкам/оператору и
+  /// экспортом в Excel, чтобы не тянуть данные с бэкенда повторно.
+  final AsyncValue<List<CampaignImpressionRecord>> allRecords;
+
   const CampaignAnalyticsState({
     required this.impressions,
     required this.aggregate,
     required this.filters,
     required this.prefs,
     required this.query,
+    required this.allRecords,
   });
 
   factory CampaignAnalyticsState.initial() => CampaignAnalyticsState(
@@ -86,6 +92,7 @@ class CampaignAnalyticsState {
     filters: const AsyncValue.loading(),
     prefs: const CampaignAnalyticsDashboardPrefs.defaults(),
     query: CampaignAnalyticsQuery.initial(),
+    allRecords: const AsyncValue.loading(),
   );
 
   CampaignAnalyticsState copyWith({
@@ -94,6 +101,7 @@ class CampaignAnalyticsState {
     AsyncValue<CampaignAnalyticsFiltersData>? filters,
     CampaignAnalyticsDashboardPrefs? prefs,
     CampaignAnalyticsQuery? query,
+    AsyncValue<List<CampaignImpressionRecord>>? allRecords,
   }) {
     return CampaignAnalyticsState(
       impressions: impressions ?? this.impressions,
@@ -101,6 +109,7 @@ class CampaignAnalyticsState {
       filters: filters ?? this.filters,
       prefs: prefs ?? this.prefs,
       query: query ?? this.query,
+      allRecords: allRecords ?? this.allRecords,
     );
   }
 }
@@ -160,16 +169,18 @@ class CampaignAnalyticsController
     state = state.copyWith(
       impressions: const AsyncValue.loading(),
       aggregate: const AsyncValue.loading(),
+      allRecords: const AsyncValue.loading(),
     );
 
     try {
       final query = state.query;
       final results = await Future.wait([
         _fetchPage(query),
-        _fetchAggregate(query),
+        _fetchAggregateWithRecords(query),
       ]);
       final response = results[0];
-      final aggregate = results[1] as CampaignAnalyticsAggregate;
+      final (aggregate, allRecords) =
+          results[1] as (CampaignAnalyticsAggregate, List<CampaignImpressionRecord>);
 
       state = state.copyWith(
         impressions: AsyncValue.data(
@@ -178,6 +189,7 @@ class CampaignAnalyticsController
           ),
         ),
         aggregate: AsyncValue.data(aggregate),
+        allRecords: AsyncValue.data(allRecords),
       );
     } on DioException catch (e, st) {
       final serverDetails = _extractServerDetails(e);
@@ -190,11 +202,16 @@ class CampaignAnalyticsController
           serverDetails == null ? e : Exception(serverDetails),
           st,
         ),
+        allRecords: AsyncValue.error(
+          serverDetails == null ? e : Exception(serverDetails),
+          st,
+        ),
       );
     } catch (e, st) {
       state = state.copyWith(
         impressions: AsyncValue.error(e, st),
         aggregate: AsyncValue.error(e, st),
+        allRecords: AsyncValue.error(e, st),
       );
     }
   }
@@ -335,7 +352,13 @@ class CampaignAnalyticsController
     return _fetchImpressionsWithFallback(query);
   }
 
-  Future<CampaignAnalyticsAggregate> _fetchAggregate(
+  Future<(CampaignAnalyticsAggregate, List<CampaignImpressionRecord>)>
+  _fetchAggregateWithRecords(CampaignAnalyticsQuery query) async {
+    final records = await _fetchAllRecords(query);
+    return (CampaignAnalyticsAggregate.fromRecords(records), records);
+  }
+
+  Future<List<CampaignImpressionRecord>> _fetchAllRecords(
     CampaignAnalyticsQuery query,
   ) async {
     final aggregateQuery = query.copyWith(page: 0, size: 500);
@@ -364,7 +387,7 @@ class CampaignAnalyticsController
       }
     }
 
-    return CampaignAnalyticsAggregate.fromRecords(allRecords);
+    return allRecords;
   }
 
   static String _formatSpaceDateTime(DateTime value) {

@@ -10,6 +10,7 @@ import '../providers/campaigns_provider.dart';
 import '../services/app_notifications_service.dart';
 import '../utils/campaign_notifications.dart';
 import '../utils/pace_alerts.dart';
+import 'budgets_pace_screen.dart';
 import 'campaign_detail.dart';
 import 'campaign_create.dart';
 import 'service_dashboard_screen.dart';
@@ -438,6 +439,19 @@ class _CampaignsScreenState extends ConsumerState<CampaignsScreen> {
             },
             child: const Icon(
               Icons.space_dashboard_rounded,
+              color: kTextSecondary,
+              size: 20,
+            ),
+          ),
+          _HeaderActionButton(
+            tooltip: 'Бюджеты и темпы',
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const BudgetsPaceScreen()),
+              );
+            },
+            child: const Icon(
+              Icons.speed_rounded,
               color: kTextSecondary,
               size: 20,
             ),

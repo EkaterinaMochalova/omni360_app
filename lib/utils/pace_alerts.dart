@@ -13,7 +13,7 @@ class PaceAlert {
 /// Возвращает (startHour, endHour) активных часов кампании на сегодня.
 /// Если расписание не задано — fallback 0–24 (весь день).
 /// Если кампания сегодня не активна — возвращает null.
-(int start, int end)? _activeHoursToday(Campaign campaign) {
+(int start, int end)? activeHoursToday(Campaign campaign) {
   final slots = campaign.timeSettings;
   if (slots == null || slots.isEmpty) return (0, 24); // нет расписания — весь день
 
@@ -29,7 +29,7 @@ class PaceAlert {
 /// Доля прошедшего дня в рамках активных часов кампании.
 /// 0 = вне активного окна (слишком рано, поздно или не тот день).
 double expectedDayFraction(Campaign campaign) {
-  final hours = _activeHoursToday(campaign);
+  final hours = activeHoursToday(campaign);
   if (hours == null) return 0;
   final (start, end) = hours;
   final total = (end - start).toDouble();
@@ -45,7 +45,7 @@ double expectedDayFraction(Campaign campaign) {
 
 /// Проверяет, находится ли текущее время в активном окне кампании.
 bool isWithinSchedule(Campaign campaign) {
-  final hours = _activeHoursToday(campaign);
+  final hours = activeHoursToday(campaign);
   if (hours == null) return false;
   final (start, end) = hours;
   final h = DateTime.now().hour;

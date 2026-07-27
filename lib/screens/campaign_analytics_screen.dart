@@ -5,7 +5,15 @@ import 'package:intl/intl.dart';
 
 import '../main.dart';
 import '../models/campaign_analytics.dart';
+import '../models/loss_report.dart';
 import '../providers/campaign_analytics_provider.dart';
+import '../services/excel_export_service.dart';
+import '../services/file_saver.dart';
+import '../services/file_saver_stub.dart'
+    if (dart.library.io) '../services/file_saver_native.dart'
+    if (dart.library.html) '../services/file_saver_web.dart';
+import '../widgets/card_section.dart';
+import '../widgets/loss_report_sections.dart';
 
 class CampaignAnalyticsScreen extends ConsumerWidget {
   final String campaignId;
@@ -47,6 +55,11 @@ class CampaignAnalyticsScreen extends ConsumerWidget {
           ],
         ),
         actions: [
+          IconButton(
+            tooltip: 'Экспорт в Excel',
+            onPressed: () => _exportToExcel(context, state),
+            icon: const Icon(Icons.ios_share_rounded),
+          ),
           IconButton(
             tooltip: 'Настроить дашборд',
             onPressed: () => _openDashboardSettings(context, state, controller),
@@ -94,6 +107,9 @@ class CampaignAnalyticsScreen extends ConsumerWidget {
                 aggregate:
                     state.aggregate.asData?.value ??
                     CampaignAnalyticsAggregate.empty(),
+                lossReport: LossReportBuilder.build(
+                  state.allRecords.asData?.value ?? const [],
+                ),
                 onPageChange: controller.setPage,
               ),
             ),
@@ -101,6 +117,36 @@ class CampaignAnalyticsScreen extends ConsumerWidget {
         ],
       ),
     );
+  }
+
+  Future<void> _exportToExcel(
+    BuildContext context,
+    CampaignAnalyticsState state,
+  ) async {
+    final records = state.allRecords.asData?.value ?? const [];
+    if (records.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Нет данных для экспорта за выбранный период')),
+      );
+      return;
+    }
+
+    try {
+      final report = LossReportBuilder.build(records);
+      final bytes = buildLossReportWorkbook(
+        campaignName: campaignName,
+        records: records,
+        report: report,
+      );
+      final safeName = campaignName.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+      final FileSaver saver = createFileSaver();
+      await saver.saveAndShareFile(bytes, '$safeName-показы.xlsx');
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Не удалось сформировать отчёт: $e')),
+      );
+    }
   }
 
   void _openDashboardSettings(
@@ -160,6 +206,27 @@ class CampaignAnalyticsScreen extends ConsumerWidget {
                 value: state.prefs.showRequestTable,
                 onChanged: (value) => controller.updatePrefs(
                   state.prefs.copyWith(showRequestTable: value),
+                ),
+              ),
+              _DashboardToggleTile(
+                title: 'Сводная по дням',
+                value: state.prefs.showDailyBreakdown,
+                onChanged: (value) => controller.updatePrefs(
+                  state.prefs.copyWith(showDailyBreakdown: value),
+                ),
+              ),
+              _DashboardToggleTile(
+                title: 'Поднять ставки',
+                value: state.prefs.showBidReport,
+                onChanged: (value) => controller.updatePrefs(
+                  state.prefs.copyWith(showBidReport: value),
+                ),
+              ),
+              _DashboardToggleTile(
+                title: 'К оператору',
+                value: state.prefs.showOperatorReport,
+                onChanged: (value) => controller.updatePrefs(
+                  state.prefs.copyWith(showOperatorReport: value),
                 ),
               ),
             ],
@@ -394,12 +461,14 @@ class _AnalyticsBody extends StatelessWidget {
   final CampaignAnalyticsState state;
   final CampaignImpressionsPage page;
   final CampaignAnalyticsAggregate aggregate;
+  final LossReport lossReport;
   final ValueChanged<int> onPageChange;
 
   const _AnalyticsBody({
     required this.state,
     required this.page,
     required this.aggregate,
+    required this.lossReport,
     required this.onPageChange,
   });
 
@@ -425,7 +494,7 @@ class _AnalyticsBody extends StatelessWidget {
       padding: const EdgeInsets.all(16),
       children: [
         if (state.prefs.showSummary)
-          _CardSection(
+          CardSection(
             title: 'Сводка',
             subtitle: hasScreenFilter ? selectedScreenLabel : null,
             child: Wrap(
@@ -446,7 +515,7 @@ class _AnalyticsBody extends StatelessWidget {
           ),
         if (state.prefs.showSummary) const SizedBox(height: 12),
         if (state.prefs.showStateBreakdown)
-          _CardSection(
+          CardSection(
             title: 'Статусы запросов',
             child: Column(
               children: stateCounts.entries
@@ -462,7 +531,7 @@ class _AnalyticsBody extends StatelessWidget {
           ),
         if (state.prefs.showStateBreakdown) const SizedBox(height: 12),
         if (state.prefs.showFailureBreakdown && failureCounts.isNotEmpty)
-          _CardSection(
+          CardSection(
             title: 'Причины проигрышей',
             child: Column(
               children: failureCounts.entries
@@ -479,7 +548,7 @@ class _AnalyticsBody extends StatelessWidget {
         if (state.prefs.showFailureBreakdown && failureCounts.isNotEmpty)
           const SizedBox(height: 12),
         if (state.prefs.showRequestTable)
-          _CardSection(
+          CardSection(
             title: 'Каждый запрос',
             subtitle:
                 'Победы, проигрыши и аукционные параметры по каждому request',
@@ -523,55 +592,16 @@ class _AnalyticsBody extends StatelessWidget {
                     ],
                   ),
           ),
+        if (state.prefs.showRequestTable) const SizedBox(height: 12),
+        if (state.prefs.showDailyBreakdown)
+          DailyBreakdownSection(rows: lossReport.dailyBreakdown),
+        if (state.prefs.showDailyBreakdown) const SizedBox(height: 12),
+        if (state.prefs.showBidReport)
+          BidRaiseReportSection(rows: lossReport.bidRaiseRows),
+        if (state.prefs.showBidReport) const SizedBox(height: 12),
+        if (state.prefs.showOperatorReport)
+          OperatorIssueReportSection(groups: lossReport.operatorIssueGroups),
       ],
-    );
-  }
-}
-
-class _CardSection extends StatelessWidget {
-  final String title;
-  final String? subtitle;
-  final Widget child;
-
-  const _CardSection({required this.title, this.subtitle, required this.child});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            title,
-            style: const TextStyle(
-              color: kTextPrimary,
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          if (subtitle != null) ...[
-            const SizedBox(height: 4),
-            Text(
-              subtitle!,
-              style: const TextStyle(color: kTextSecondary, fontSize: 12),
-            ),
-          ],
-          const SizedBox(height: 12),
-          child,
-        ],
-      ),
     );
   }
 }

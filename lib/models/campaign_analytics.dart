@@ -150,6 +150,37 @@ class CampaignImpressionRecord {
   bool get isLoss => state == 'FAILED';
 }
 
+/// Причина проигрыша показа с точки зрения того, что с ней делать дальше.
+enum LossCategory {
+  /// Проигрыш в аукционе из-за низкой ставки — нужно поднять ставку.
+  lowBid,
+
+  /// Показ не подтверждён SSP/плеером, причина неизвестна и т.п. —
+  /// нужно разбираться с оператором.
+  operatorIssue,
+}
+
+/// HEURISTIC: не проверено на реальных данных прод-API. Основной сигнал —
+/// числовое сравнение bid/bidFloor (как в исходном Excel-отчёте, где причина
+/// отказа текстом указывала "Ставка ниже чем минимальная ставка"). Если
+/// бэкенд когда-нибудь начнёт отдавать явный код причины про низкую ставку,
+/// он будет обработан первым без изменений в остальном коде.
+/// TODO: сверить с реальными показами — всегда ли bid/bidFloor заполнены
+/// у FAILED-записей, и встречается ли явный код причины "низкая ставка".
+LossCategory classifyLoss(CampaignImpressionRecord record) {
+  final code = record.failureReasonCodeName?.toUpperCase() ?? '';
+  final type = record.failureReasonType?.toUpperCase() ?? '';
+  if (code.contains('BID') || type.contains('BID') || type.contains('FLOOR')) {
+    return LossCategory.lowBid;
+  }
+  if (record.bid != null &&
+      record.bidFloor != null &&
+      record.bid! < record.bidFloor!) {
+    return LossCategory.lowBid;
+  }
+  return LossCategory.operatorIssue;
+}
+
 class CampaignImpressionsPage {
   final List<CampaignImpressionRecord> content;
   final int page;
@@ -240,31 +271,46 @@ class CampaignAnalyticsDashboardPrefs {
   final bool showStateBreakdown;
   final bool showFailureBreakdown;
   final bool showRequestTable;
+  final bool showDailyBreakdown;
+  final bool showBidReport;
+  final bool showOperatorReport;
 
   const CampaignAnalyticsDashboardPrefs({
     required this.showSummary,
     required this.showStateBreakdown,
     required this.showFailureBreakdown,
     required this.showRequestTable,
+    required this.showDailyBreakdown,
+    required this.showBidReport,
+    required this.showOperatorReport,
   });
 
   const CampaignAnalyticsDashboardPrefs.defaults()
     : showSummary = true,
       showStateBreakdown = true,
       showFailureBreakdown = true,
-      showRequestTable = true;
+      showRequestTable = true,
+      showDailyBreakdown = true,
+      showBidReport = true,
+      showOperatorReport = true;
 
   CampaignAnalyticsDashboardPrefs copyWith({
     bool? showSummary,
     bool? showStateBreakdown,
     bool? showFailureBreakdown,
     bool? showRequestTable,
+    bool? showDailyBreakdown,
+    bool? showBidReport,
+    bool? showOperatorReport,
   }) {
     return CampaignAnalyticsDashboardPrefs(
       showSummary: showSummary ?? this.showSummary,
       showStateBreakdown: showStateBreakdown ?? this.showStateBreakdown,
       showFailureBreakdown: showFailureBreakdown ?? this.showFailureBreakdown,
       showRequestTable: showRequestTable ?? this.showRequestTable,
+      showDailyBreakdown: showDailyBreakdown ?? this.showDailyBreakdown,
+      showBidReport: showBidReport ?? this.showBidReport,
+      showOperatorReport: showOperatorReport ?? this.showOperatorReport,
     );
   }
 
@@ -273,6 +319,9 @@ class CampaignAnalyticsDashboardPrefs {
     'showStateBreakdown': showStateBreakdown,
     'showFailureBreakdown': showFailureBreakdown,
     'showRequestTable': showRequestTable,
+    'showDailyBreakdown': showDailyBreakdown,
+    'showBidReport': showBidReport,
+    'showOperatorReport': showOperatorReport,
   };
 
   factory CampaignAnalyticsDashboardPrefs.fromJson(Map<String, dynamic> json) {
@@ -281,6 +330,9 @@ class CampaignAnalyticsDashboardPrefs {
       showStateBreakdown: json['showStateBreakdown'] as bool? ?? true,
       showFailureBreakdown: json['showFailureBreakdown'] as bool? ?? true,
       showRequestTable: json['showRequestTable'] as bool? ?? true,
+      showDailyBreakdown: json['showDailyBreakdown'] as bool? ?? true,
+      showBidReport: json['showBidReport'] as bool? ?? true,
+      showOperatorReport: json['showOperatorReport'] as bool? ?? true,
     );
   }
 }
