@@ -189,8 +189,7 @@ class CampaignPaceSummary {
     var broadcastSecondsLeft = 0;
     var broadcastDaysLeft = 0;
     for (var i = 0; i < daysToScan; i++) {
-      // Через конструктор, а не add(Duration(days:1)) — переход на летнее
-      // время иначе сдвигает дату и ломает день недели.
+      // Через конструктор: day + i сам нормализует переход через конец месяца.
       final date = DateTime(
         todayDate.year,
         todayDate.month,

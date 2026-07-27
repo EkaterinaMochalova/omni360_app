@@ -95,7 +95,20 @@ final campaignDetailProvider = FutureProvider.family<Campaign, String>((
   print(
     '[DEBUG detail] strategy=${data['strategy']} segments=${data['segments']}',
   );
-  return Campaign.fromJson(data);
+  final campaign = Campaign.fromJson(data);
+  // Плановый OTS кампании берётся первым делом из maxImpressionsCount —
+  // печатаем всех кандидатов рядом с результатом, чтобы проверить, что это
+  // действительно контакты, а не лимит выходов, и что единицы совпадают
+  // с суммой по сегментам (та домножается на 1000).
+  // ignore: avoid_print
+  print(
+    '[DEBUG ots plan] parsed=${campaign.ots} exits=${campaign.exits} | '
+    'maxImpressionsCount=${data['maxImpressionsCount']} '
+    'ots=${data['ots']} totalOts=${data['totalOts']} '
+    'maxDailyImpressionsCount=${data['maxDailyImpressionsCount']} '
+    'plays=${data['plays']} exits=${data['exits']}',
+  );
+  return campaign;
 });
 
 // --- Campaign stats via GET /impression-stats ---
@@ -112,6 +125,19 @@ final campaignStatsProvider = FutureProvider.family<CampaignStats, String>((
     final data = response.data;
     if (data is Map<String, dynamic>) {
       final stats = CampaignStats.fromImpressionStats(data);
+      // Диагностика OTS: сверяем, из какого поля пришли план и факт и не
+      // расходятся ли они на порядок (признак разных единиц — контакты против
+      // тысяч контактов, либо выходы, подставленные вместо контактов).
+      // ignore: avoid_print
+      print(
+        '[ots $id] plan=${stats.planOts} fact=${stats.factOts} '
+        'estimated=${stats.factOtsIsEstimated} | '
+        'otsCount=${data['otsCount']} reservedOts=${(data['reservedBudgetStat'] as Map?)?['ots']} '
+        'otsCountShowed=${data['otsCountShowed']} totalDmpOts=${data['totalDmpOts']} '
+        'totalEstimatedOts=${data['totalEstimatedOts']} '
+        'hourlyOts=${data['hourlyOts']} hourlyOtsShowed=${data['hourlyOtsShowed']} '
+        'totalCountShowed=${data['totalCountShowed']}',
+      );
       if (stats.factBudget <= 0) {
         // Диагностика: факт по бюджету не нашёлся ни в одном из ожидаемых
         // полей — печатаем, что реально пришло, чтобы не гадать.

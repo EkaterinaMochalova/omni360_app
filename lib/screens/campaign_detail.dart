@@ -443,12 +443,17 @@ class _PlanFactCard extends StatelessWidget {
 
     // OTS — показываем если есть план ИЛИ факт
     final factOts = (s != null && s.factOts > 0) ? s.factOts : null;
+    // Измеренного OTS у части кампаний нет, и факт подставляется из
+    // смоделированного/оценочного значения — подписываем честно.
+    final otsEstimated = s?.factOtsIsEstimated ?? false;
     if ((planOts != null && planOts > 0) || factOts != null) {
       rows.add(
         _PlanFactRow(
-          label: 'OTS',
+          label: otsEstimated ? 'OTS (оценка)' : 'OTS',
           plan: (planOts != null && planOts > 0) ? fmtNum.format(planOts) : '—',
-          fact: factOts != null ? fmtNum.format(factOts) : null,
+          fact: factOts != null
+              ? '${otsEstimated ? '≈' : ''}${fmtNum.format(factOts)}'
+              : null,
           ratio: (factOts != null && planOts != null && planOts > 0)
               ? factOts / planOts
               : null,
@@ -711,7 +716,7 @@ class _DetailedStatsCard extends StatelessWidget {
         ratio: _ratio(s?.hourlyBudgetPlan, s?.hourlyBudgetFact),
       ),
       _DetailedStatRowData(
-        label: 'OTS общий',
+        label: (s?.factOtsIsEstimated ?? false) ? 'OTS общий (оценка)' : 'OTS общий',
         plan: num(planOts),
         fact: num(s?.factOts),
         ratio: _ratio(planOts, s?.factOts),

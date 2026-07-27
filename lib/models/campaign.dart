@@ -403,6 +403,9 @@ class CampaignStats {
   final double factBudget; // totalBudgetShowed
   final double factDailyBudget; // dailyBudgetShowed
   final double factOts; // otsCountShowed
+  /// true — факт по OTS взят не из измеренного otsCountShowed, а из
+  /// смоделированного/оценочного значения (totalDmpOts / totalEstimatedOts).
+  final bool factOtsIsEstimated;
   final int factExits; // totalCountShowed (кол-во выходов)
 
   // Часовые показатели (для расчёта темпа)
@@ -423,6 +426,7 @@ class CampaignStats {
     required this.factBudget,
     required this.factDailyBudget,
     required this.factOts,
+    this.factOtsIsEstimated = false,
     required this.factExits,
     required this.hourlyBudgetPlan,
     required this.hourlyBudgetFact,
@@ -448,12 +452,18 @@ class CampaignStats {
       customer?['budgetShowed'],
       json['dailyBudgetShowed'],
     ]);
-    // factOts: otsCountShowed или dailyOtsShowed * дней
-    final factOts = _n(json['otsCountShowed']) > 0
-        ? _n(json['otsCountShowed'])
-        : _n(json['totalDmpOts']) > 0
-        ? _n(json['totalDmpOts'])
-        : _n(json['totalEstimatedOts']);
+    // Факт по OTS. Реально измеренный факт — только otsCountShowed.
+    // totalDmpOts — OTS, смоделированный по данным DMP, totalEstimatedOts —
+    // расчётная оценка. Оставляем их как запасной вариант (иначе для части
+    // кампаний факта не будет вовсе), но помечаем: выдавать оценку за факт
+    // и считать от неё план/факт — значит показывать правдоподобную неправду.
+    final otsShowed = _n(json['otsCountShowed']);
+    final dmpOts = _n(json['totalDmpOts']);
+    final estimatedOts = _n(json['totalEstimatedOts']);
+    final factOts = otsShowed > 0
+        ? otsShowed
+        : (dmpOts > 0 ? dmpOts : estimatedOts);
+    final factOtsIsEstimated = otsShowed <= 0 && factOts > 0;
 
     return CampaignStats(
       planBudget: _n(json['budget']) > 0
@@ -466,6 +476,7 @@ class CampaignStats {
       factBudget: factBudget,
       factDailyBudget: _n(json['dailyBudgetShowed']),
       factOts: factOts,
+      factOtsIsEstimated: factOtsIsEstimated,
       factExits: _n(json['totalCountShowed']).toInt(),
       hourlyBudgetPlan: _n(json['hourlyBudget']),
       hourlyBudgetFact: _n(json['hourlyBudgetShowed']),
