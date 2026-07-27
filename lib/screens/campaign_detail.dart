@@ -4,17 +4,65 @@ import 'package:intl/intl.dart';
 import '../main.dart';
 import '../providers/campaigns_provider.dart';
 import '../models/campaign.dart';
+import '../services/local_order_store.dart';
+import '../widgets/reorderable_flex_wrap.dart';
 import 'campaign_analytics_screen.dart';
 import '../widgets/stats_chart.dart';
 import '../utils/pace_alerts.dart';
 
-class CampaignDetailScreen extends ConsumerWidget {
+const _kDetailOrderKey = 'omni360-detail-order';
+const _kDetailBlockIds = [
+  'status',
+  'dates',
+  'photo',
+  'planFact',
+  'detailed',
+  'auction',
+  'chart',
+];
+
+typedef _DetailBlock = ({String id, bool isWide, Widget child});
+
+class CampaignDetailScreen extends ConsumerStatefulWidget {
   final String campaignId;
 
   const CampaignDetailScreen({super.key, required this.campaignId});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<CampaignDetailScreen> createState() =>
+      _CampaignDetailScreenState();
+}
+
+class _CampaignDetailScreenState extends ConsumerState<CampaignDetailScreen> {
+  List<String> _order = _kDetailBlockIds;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadOrder();
+  }
+
+  Future<void> _loadOrder() async {
+    final saved = await LocalOrderStore.instance.loadOrder(_kDetailOrderKey);
+    if (saved != null && mounted) {
+      setState(
+        () => _order = LocalOrderStore.instance.mergeOrder(
+          _kDetailBlockIds,
+          saved,
+        ),
+      );
+    }
+  }
+
+  void _onReorder(List<_DetailBlock> newOrder) {
+    final ids = newOrder.map((b) => b.id).toList();
+    setState(() => _order = ids);
+    LocalOrderStore.instance.saveOrder(_kDetailOrderKey, ids);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final campaignId = widget.campaignId;
     final detail = ref.watch(campaignDetailProvider(campaignId));
     final stats = ref.watch(campaignStatsProvider(campaignId));
     final photoCoverage = ref.watch(campaignPhotoCoverageProvider(campaignId));
@@ -56,41 +104,75 @@ class CampaignDetailScreen extends ConsumerWidget {
             style: const TextStyle(color: kTextSecondary),
           ),
         ),
-        data: (campaign) => SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              _StatusCard(campaign: campaign),
-              const SizedBox(height: 12),
-              _DatesCard(campaign: campaign),
-              const SizedBox(height: 12),
-              _PhotoCoverageCard(coverage: photoCoverage),
-              const SizedBox(height: 12),
-              // Plan / Fact card — passes stats when loaded
-              stats.maybeWhen(
+        data: (campaign) {
+          final blocksById = <String, _DetailBlock>{
+            'status': (
+              id: 'status',
+              isWide: false,
+              child: _StatusCard(campaign: campaign),
+            ),
+            'dates': (
+              id: 'dates',
+              isWide: false,
+              child: _DatesCard(campaign: campaign),
+            ),
+            'photo': (
+              id: 'photo',
+              isWide: false,
+              child: _PhotoCoverageCard(coverage: photoCoverage),
+            ),
+            'planFact': (
+              id: 'planFact',
+              isWide: true,
+              child: stats.maybeWhen(
                 data: (s) => _PlanFactCard(campaign: campaign, stats: s),
                 orElse: () => _PlanFactCard(campaign: campaign, stats: null),
               ),
-              const SizedBox(height: 12),
-              stats.maybeWhen(
+            ),
+            'detailed': (
+              id: 'detailed',
+              isWide: true,
+              child: stats.maybeWhen(
                 data: (s) => _DetailedStatsCard(campaign: campaign, stats: s),
                 orElse: () =>
                     _DetailedStatsCard(campaign: campaign, stats: null),
               ),
-              const SizedBox(height: 12),
-              _AuctionAnalyticsCard(campaign: campaign),
-              const SizedBox(height: 12),
-              // Daily chart
-              stats.maybeWhen(
-                data: (s) => s.daily.isNotEmpty
-                    ? _ChartCard(stats: s)
-                    : const SizedBox.shrink(),
-                orElse: () => const SizedBox.shrink(),
+            ),
+            'auction': (
+              id: 'auction',
+              isWide: false,
+              child: _AuctionAnalyticsCard(campaign: campaign),
+            ),
+            if (stats.maybeWhen(
+              data: (s) => s.daily.isNotEmpty,
+              orElse: () => false,
+            ))
+              'chart': (
+                id: 'chart',
+                isWide: true,
+                child: stats.maybeWhen(
+                  data: (s) => _ChartCard(stats: s),
+                  orElse: () => const SizedBox.shrink(),
+                ),
               ),
-            ],
-          ),
-        ),
+          };
+
+          final blocks = [
+            for (final id in _order)
+              if (blocksById.containsKey(id)) blocksById[id]!,
+          ];
+
+          return SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: ReorderableFlexWrap<_DetailBlock>(
+              items: blocks,
+              idOf: (b) => b.id,
+              isWide: (b) => b.isWide,
+              onReorder: _onReorder,
+              itemBuilder: (context, b) => b.child,
+            ),
+          );
+        },
       ),
     );
   }
@@ -663,49 +745,32 @@ class _DetailedStatsCard extends StatelessWidget {
             style: TextStyle(color: kTextSecondary, fontSize: 12),
           ),
           const SizedBox(height: 14),
-          Row(
-            children: const [
-              Expanded(
-                child: Text(
-                  'Метрика',
-                  style: TextStyle(
-                    color: kTextSecondary,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-              SizedBox(
-                width: 96,
-                child: Text(
-                  'ПЛАН',
-                  textAlign: TextAlign.right,
-                  style: TextStyle(
-                    color: kTextSecondary,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-              SizedBox(width: 12),
-              SizedBox(
-                width: 96,
-                child: Text(
-                  'ФАКТ',
-                  textAlign: TextAlign.right,
-                  style: TextStyle(
-                    color: kAccent,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            ],
+          LayoutBuilder(
+            builder: (context, constraints) {
+              const tileWidth = 140.0;
+              const spacing = 12.0;
+              var columns = ((constraints.maxWidth + spacing) /
+                      (tileWidth + spacing))
+                  .floor();
+              if (columns < 1) columns = 1;
+
+              return Wrap(
+                spacing: spacing,
+                runSpacing: spacing,
+                children: rows
+                    .map(
+                      (row) => SizedBox(
+                        width:
+                            (constraints.maxWidth -
+                                spacing * (columns - 1)) /
+                            columns,
+                        child: _DetailedStatTile(row: row),
+                      ),
+                    )
+                    .toList(),
+              );
+            },
           ),
-          const SizedBox(height: 8),
-          const Divider(height: 1, color: kBorder),
-          const SizedBox(height: 4),
-          ...rows.map((row) => _DetailedStatRow(row: row)),
         ],
       ),
     );
@@ -777,16 +842,16 @@ class _DetailedStatRowData {
   });
 }
 
-class _DetailedStatRow extends StatelessWidget {
+class _DetailedStatTile extends StatelessWidget {
   final _DetailedStatRowData row;
 
-  const _DetailedStatRow({required this.row});
+  const _DetailedStatTile({required this.row});
 
   @override
   Widget build(BuildContext context) {
     final completion = row.ratio == null
         ? null
-        : '% выполнения плана: ${(row.ratio! * 100).toStringAsFixed(0)}%';
+        : '${(row.ratio! * 100).toStringAsFixed(0)}% плана';
     final deltaColor = row.ratio == null
         ? kTextSecondary
         : row.ratio! > 1.05
@@ -795,76 +860,39 @@ class _DetailedStatRow extends StatelessWidget {
         ? const Color(0xFF1565C0)
         : const Color(0xFF2E7D32);
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 10),
-      child: Column(
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Text(
-                  row.label,
-                  style: const TextStyle(
-                    color: kTextPrimary,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ),
-              SizedBox(
-                width: 96,
-                child: Text(
-                  row.plan,
-                  textAlign: TextAlign.right,
-                  style: const TextStyle(color: kTextSecondary, fontSize: 13),
-                ),
-              ),
-              const SizedBox(width: 12),
-              SizedBox(
-                width: 96,
-                child: Text(
-                  row.fact,
-                  textAlign: TextAlign.right,
-                  style: const TextStyle(
-                    color: kTextPrimary,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            ],
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          row.label,
+          style: const TextStyle(color: kTextSecondary, fontSize: 11),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          'План: ${row.plan}',
+          style: const TextStyle(color: kTextSecondary, fontSize: 13),
+        ),
+        Text(
+          row.fact,
+          style: const TextStyle(
+            color: kTextPrimary,
+            fontSize: 14,
+            fontWeight: FontWeight.bold,
           ),
-          if (completion != null) ...[
-            const SizedBox(height: 6),
-            Row(
-              children: [
-                const Spacer(),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 3,
-                  ),
-                  decoration: BoxDecoration(
-                    color: deltaColor.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                  child: Text(
-                    completion,
-                    style: TextStyle(
-                      color: deltaColor,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ],
+        ),
+        if (completion != null) ...[
+          const SizedBox(height: 2),
+          Text(
+            completion,
+            style: TextStyle(
+              color: deltaColor,
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
             ),
-          ],
-          const SizedBox(height: 10),
-          const Divider(height: 1, color: kBorder),
+          ),
         ],
-      ),
+      ],
     );
   }
 }

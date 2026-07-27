@@ -12,8 +12,10 @@ import '../services/file_saver.dart';
 import '../services/file_saver_stub.dart'
     if (dart.library.io) '../services/file_saver_native.dart'
     if (dart.library.html) '../services/file_saver_web.dart';
+import '../services/local_order_store.dart';
 import '../widgets/card_section.dart';
 import '../widgets/loss_report_sections.dart';
+import '../widgets/reorderable_flex_wrap.dart';
 
 class CampaignAnalyticsScreen extends ConsumerWidget {
   final String campaignId;
@@ -457,7 +459,20 @@ class _Toolbar extends StatelessWidget {
   }
 }
 
-class _AnalyticsBody extends StatelessWidget {
+const _kAnalyticsOrderKey = 'omni360-analytics-order';
+const _kAnalyticsBlockIds = [
+  'summary',
+  'states',
+  'failures',
+  'requests',
+  'daily',
+  'bidReport',
+  'operatorReport',
+];
+
+typedef _AnalyticsBlock = ({String id, bool isWide, Widget child});
+
+class _AnalyticsBody extends StatefulWidget {
   final CampaignAnalyticsState state;
   final CampaignImpressionsPage page;
   final CampaignAnalyticsAggregate aggregate;
@@ -473,7 +488,44 @@ class _AnalyticsBody extends StatelessWidget {
   });
 
   @override
+  State<_AnalyticsBody> createState() => _AnalyticsBodyState();
+}
+
+class _AnalyticsBodyState extends State<_AnalyticsBody> {
+  List<String> _order = _kAnalyticsBlockIds;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadOrder();
+  }
+
+  Future<void> _loadOrder() async {
+    final saved = await LocalOrderStore.instance.loadOrder(_kAnalyticsOrderKey);
+    if (saved != null && mounted) {
+      setState(
+        () => _order = LocalOrderStore.instance.mergeOrder(
+          _kAnalyticsBlockIds,
+          saved,
+        ),
+      );
+    }
+  }
+
+  void _onReorder(List<_AnalyticsBlock> newOrder) {
+    final ids = newOrder.map((b) => b.id).toList();
+    setState(() => _order = ids);
+    LocalOrderStore.instance.saveOrder(_kAnalyticsOrderKey, ids);
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final state = widget.state;
+    final page = widget.page;
+    final aggregate = widget.aggregate;
+    final lossReport = widget.lossReport;
+    final onPageChange = widget.onPageChange;
+
     final records = page.content;
     final stateCounts = aggregate.stateCounts;
     final failureCounts = aggregate.failureCounts;
@@ -490,18 +542,22 @@ class _AnalyticsBody extends StatelessWidget {
         'GID: ${state.query.inventoryGid}',
     ].join(' • ');
 
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        if (state.prefs.showSummary)
-          CardSection(
+    final blocksById = <String, _AnalyticsBlock>{
+      if (state.prefs.showSummary)
+        'summary': (
+          id: 'summary',
+          isWide: true,
+          child: CardSection(
             title: 'Сводка',
             subtitle: hasScreenFilter ? selectedScreenLabel : null,
             child: Wrap(
               spacing: 10,
               runSpacing: 10,
               children: [
-                _MetricCard(label: 'Запросов', value: '${aggregate.totalRequests}'),
+                _MetricCard(
+                  label: 'Запросов',
+                  value: '${aggregate.totalRequests}',
+                ),
                 _MetricCard(label: 'Победы', value: '$wins'),
                 _MetricCard(label: 'Проигрыши', value: '$losses'),
                 if (hasScreenFilter)
@@ -519,9 +575,12 @@ class _AnalyticsBody extends StatelessWidget {
               ],
             ),
           ),
-        if (state.prefs.showSummary) const SizedBox(height: 12),
-        if (state.prefs.showStateBreakdown)
-          CardSection(
+        ),
+      if (state.prefs.showStateBreakdown)
+        'states': (
+          id: 'states',
+          isWide: false,
+          child: CardSection(
             title: 'Статусы запросов',
             child: Column(
               children: stateCounts.entries
@@ -535,9 +594,12 @@ class _AnalyticsBody extends StatelessWidget {
                   .toList(),
             ),
           ),
-        if (state.prefs.showStateBreakdown) const SizedBox(height: 12),
-        if (state.prefs.showFailureBreakdown && failureCounts.isNotEmpty)
-          CardSection(
+        ),
+      if (state.prefs.showFailureBreakdown && failureCounts.isNotEmpty)
+        'failures': (
+          id: 'failures',
+          isWide: false,
+          child: CardSection(
             title: 'Причины проигрышей',
             child: Column(
               children: failureCounts.entries
@@ -551,10 +613,12 @@ class _AnalyticsBody extends StatelessWidget {
                   .toList(),
             ),
           ),
-        if (state.prefs.showFailureBreakdown && failureCounts.isNotEmpty)
-          const SizedBox(height: 12),
-        if (state.prefs.showRequestTable)
-          CardSection(
+        ),
+      if (state.prefs.showRequestTable)
+        'requests': (
+          id: 'requests',
+          isWide: false,
+          child: CardSection(
             title: 'Каждый запрос',
             subtitle:
                 'Победы, проигрыши и аукционные параметры по каждому request',
@@ -598,16 +662,43 @@ class _AnalyticsBody extends StatelessWidget {
                     ],
                   ),
           ),
-        if (state.prefs.showRequestTable) const SizedBox(height: 12),
-        if (state.prefs.showDailyBreakdown)
-          DailyBreakdownSection(rows: lossReport.dailyBreakdown),
-        if (state.prefs.showDailyBreakdown) const SizedBox(height: 12),
-        if (state.prefs.showBidReport)
-          BidRaiseReportSection(rows: lossReport.bidRaiseRows),
-        if (state.prefs.showBidReport) const SizedBox(height: 12),
-        if (state.prefs.showOperatorReport)
-          OperatorIssueReportSection(groups: lossReport.operatorIssueGroups),
-      ],
+        ),
+      if (state.prefs.showDailyBreakdown)
+        'daily': (
+          id: 'daily',
+          isWide: true,
+          child: DailyBreakdownSection(rows: lossReport.dailyBreakdown),
+        ),
+      if (state.prefs.showBidReport)
+        'bidReport': (
+          id: 'bidReport',
+          isWide: true,
+          child: BidRaiseReportSection(rows: lossReport.bidRaiseRows),
+        ),
+      if (state.prefs.showOperatorReport)
+        'operatorReport': (
+          id: 'operatorReport',
+          isWide: true,
+          child: OperatorIssueReportSection(
+            groups: lossReport.operatorIssueGroups,
+          ),
+        ),
+    };
+
+    final blocks = [
+      for (final id in _order)
+        if (blocksById.containsKey(id)) blocksById[id]!,
+    ];
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: ReorderableFlexWrap<_AnalyticsBlock>(
+        items: blocks,
+        idOf: (b) => b.id,
+        isWide: (b) => b.isWide,
+        onReorder: _onReorder,
+        itemBuilder: (context, b) => b.child,
+      ),
     );
   }
 }

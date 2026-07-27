@@ -8,12 +8,16 @@ import '../models/campaign.dart';
 import '../providers/auth_provider.dart';
 import '../providers/campaigns_provider.dart';
 import '../services/app_notifications_service.dart';
+import '../services/local_order_store.dart';
 import '../utils/campaign_notifications.dart';
 import '../utils/pace_alerts.dart';
+import '../widgets/campaign_summary_panel.dart';
+import '../widgets/reorderable_flex_wrap.dart';
 import 'budgets_pace_screen.dart';
-import 'campaign_detail.dart';
 import 'campaign_create.dart';
 import 'service_dashboard_screen.dart';
+
+const _kCampaignsOrderKey = 'omni360-campaigns-order';
 
 // ── Sort enum ─────────────────────────────────────────────────────────────────
 
@@ -62,6 +66,9 @@ class _CampaignsScreenState extends ConsumerState<CampaignsScreen> {
   final Map<String, String> _lastStatuses = {};
   final Set<String> _sentNoticeKeys = {};
 
+  List<String>? _customOrder;
+  Campaign? _panelCampaign;
+
   static const _notificationCheckInterval = Duration(minutes: 5);
 
   static const _filters = [
@@ -80,6 +87,20 @@ class _CampaignsScreenState extends ConsumerState<CampaignsScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _initializeNotificationPreferences();
     });
+    _loadCustomOrder();
+  }
+
+  Future<void> _loadCustomOrder() async {
+    final saved = await LocalOrderStore.instance.loadOrder(_kCampaignsOrderKey);
+    if (saved != null && mounted) {
+      setState(() => _customOrder = saved);
+    }
+  }
+
+  void _onReorder(List<Campaign> newOrder) {
+    final ids = newOrder.map((c) => c.id).toList();
+    setState(() => _customOrder = ids);
+    LocalOrderStore.instance.saveOrder(_kCampaignsOrderKey, ids);
   }
 
   @override
@@ -406,6 +427,18 @@ class _CampaignsScreenState extends ConsumerState<CampaignsScreen> {
       },
     );
 
+    // Ручной порядок (drag-and-drop) поверх сортировки, пока пользователь не
+    // выберет другую сортировку явно (см. _showSortSheet).
+    final customOrder = _customOrder;
+    if (customOrder != null && customOrder.isNotEmpty) {
+      final byId = {for (final c in list) c.id: c};
+      final merged = LocalOrderStore.instance.mergeOrder(
+        list.map((c) => c.id).toList(),
+        customOrder,
+      );
+      list = merged.map((id) => byId[id]!).toList();
+    }
+
     return list;
   }
 
@@ -611,74 +644,83 @@ class _CampaignsScreenState extends ConsumerState<CampaignsScreen> {
           ),
         ),
       ),
-      body: campaigns.when(
-        loading: () =>
-            const Center(child: CircularProgressIndicator(color: kAccent)),
-        error: (e, _) => Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(
-                Icons.error_outline,
-                color: Colors.redAccent,
-                size: 40,
+      body: Stack(
+        children: [
+          campaigns.when(
+            loading: () =>
+                const Center(child: CircularProgressIndicator(color: kAccent)),
+            error: (e, _) => Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    Icons.error_outline,
+                    color: Colors.redAccent,
+                    size: 40,
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    e.toString(),
+                    style: const TextStyle(color: kTextSecondary),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 16),
+                  FilledButton(
+                    onPressed: () => ref.read(campaignsProvider.notifier).fetch(),
+                    style: FilledButton.styleFrom(backgroundColor: kAccent),
+                    child: const Text('Повторить'),
+                  ),
+                ],
               ),
-              const SizedBox(height: 12),
-              Text(
-                e.toString(),
-                style: const TextStyle(color: kTextSecondary),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 16),
-              FilledButton(
-                onPressed: () => ref.read(campaignsProvider.notifier).fetch(),
-                style: FilledButton.styleFrom(backgroundColor: kAccent),
-                child: const Text('Повторить'),
-              ),
-            ],
-          ),
-        ),
-        data: (all) {
-          final list = _apply(all);
-          return Column(
-            children: [
-              // Stats bar
-              _StatsBar(all: all, filtered: list, sort: _sort),
-              // List
-              Expanded(
-                child: list.isEmpty
-                    ? const Center(
-                        child: Text(
-                          'Нет кампаний',
-                          style: TextStyle(color: kTextSecondary, fontSize: 15),
-                        ),
-                      )
-                    : RefreshIndicator(
-                        color: kAccent,
-                        onRefresh: () =>
-                            ref.read(campaignsProvider.notifier).fetch(),
-                        child: ListView.separated(
-                          padding: const EdgeInsets.all(16),
-                          itemCount: list.length,
-                          separatorBuilder: (context, index) =>
-                              const SizedBox(height: 10),
-                          itemBuilder: (_, i) => _CampaignCard(
-                            campaign: list[i],
-                            onTap: () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => CampaignDetailScreen(
-                                  campaignId: list[i].id,
+            ),
+            data: (all) {
+              final list = _apply(all);
+              return Column(
+                children: [
+                  // Stats bar
+                  _StatsBar(all: all, filtered: list, sort: _sort),
+                  // Grid
+                  Expanded(
+                    child: list.isEmpty
+                        ? const Center(
+                            child: Text(
+                              'Нет кампаний',
+                              style: TextStyle(
+                                color: kTextSecondary,
+                                fontSize: 15,
+                              ),
+                            ),
+                          )
+                        : RefreshIndicator(
+                            color: kAccent,
+                            onRefresh: () =>
+                                ref.read(campaignsProvider.notifier).fetch(),
+                            child: SingleChildScrollView(
+                              physics: const AlwaysScrollableScrollPhysics(),
+                              padding: const EdgeInsets.all(16),
+                              child: ReorderableFlexWrap<Campaign>(
+                                items: list,
+                                idOf: (c) => c.id,
+                                onReorder: _onReorder,
+                                itemBuilder: (context, c) => _CampaignCard(
+                                  campaign: c,
+                                  onTap: () =>
+                                      setState(() => _panelCampaign = c),
                                 ),
                               ),
                             ),
                           ),
-                        ),
-                      ),
-              ),
-            ],
-          );
-        },
+                  ),
+                ],
+              );
+            },
+          ),
+          if (_panelCampaign != null)
+            CampaignSummaryPanelOverlay(
+              campaign: _panelCampaign!,
+              onClose: () => setState(() => _panelCampaign = null),
+            ),
+        ],
       ),
     );
   }
@@ -737,7 +779,11 @@ class _CampaignsScreenState extends ConsumerState<CampaignsScreen> {
                   ),
                 ),
                 onTap: () {
-                  setState(() => _sort = s);
+                  setState(() {
+                    _sort = s;
+                    _customOrder = null;
+                  });
+                  LocalOrderStore.instance.saveOrder(_kCampaignsOrderKey, const []);
                   Navigator.pop(context);
                 },
               ),
@@ -1028,81 +1074,48 @@ class _CampaignCard extends ConsumerWidget {
 
             const SizedBox(height: 12),
 
-            // Dates + budget
+            // Бюджет / Потрачено / Осталось / Период — сетка 2×2
             Row(
               children: [
-                if (c.startDate != null) ...[
-                  const Icon(
-                    Icons.calendar_today_outlined,
-                    size: 13,
-                    color: kTextSecondary,
+                Expanded(
+                  child: _Metric(
+                    'Бюджет',
+                    c.budget != null ? fmt.format(c.budget) : '—',
                   ),
-                  const SizedBox(width: 4),
-                  Text(
-                    '${c.startDate} – ${c.endDate ?? '...'}',
-                    style: const TextStyle(color: kTextSecondary, fontSize: 12),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _Metric(
+                    'Потрачено',
+                    effectiveSpent != null ? fmt.format(effectiveSpent) : '—',
                   ),
-                  const Spacer(),
-                ],
-                if (c.budget != null)
-                  Text(
-                    fmt.format(c.budget),
-                    style: const TextStyle(
-                      color: kTextPrimary,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 14,
-                    ),
-                  ),
+                ),
               ],
             ),
-
-            if (effectiveSpent != null || c.budget != null) ...[
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      'Потрачено: ${effectiveSpent != null ? fmt.format(effectiveSpent) : '—'}',
-                      style: const TextStyle(
-                        color: kTextSecondary,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: _Metric(
+                    'Осталось',
+                    c.budget != null
+                        ? fmt.format(
+                            ((c.budget ?? 0) - (effectiveSpent ?? 0))
+                                .clamp(0.0, double.infinity),
+                          )
+                        : '—',
                   ),
-                  Expanded(
-                    child: Text(
-                      'Осталось: ${c.budget != null ? fmt.format(((c.budget ?? 0) - (effectiveSpent ?? 0)).clamp(0.0, double.infinity)) : '—'}',
-                      textAlign: TextAlign.right,
-                      style: const TextStyle(
-                        color: kTextSecondary,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _Metric(
+                    'Период',
+                    c.startDate != null
+                        ? '${c.startDate} – ${c.endDate ?? '...'}'
+                        : '—',
                   ),
-                ],
-              ),
-            ],
-
-            const SizedBox(height: 6),
-            photoCoverage.maybeWhen(
-              data: (coverage) => Text(
-                'Фотоотчёты: ${coverage.percent.toStringAsFixed(1)}% (${coverage.sidesWithPhoto}/${coverage.totalSides})',
-                style: const TextStyle(
-                  color: kTextSecondary,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w500,
                 ),
-              ),
-              orElse: () => const Text(
-                'Фотоотчёты: —',
-                style: TextStyle(
-                  color: kTextSecondary,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
+              ],
             ),
 
             // Budget progress bar
@@ -1135,28 +1148,39 @@ class _CampaignCard extends ConsumerWidget {
               ),
             ],
 
-            // OTS / Выходы
-            if (c.ots != null || c.exits != null) ...[
-              const SizedBox(height: 12),
-              const Divider(height: 1, color: kBorder),
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  if (c.ots != null)
-                    _Metric(
-                      'OTS',
-                      NumberFormat.compact(locale: 'ru').format(c.ots),
+            // OTS / Выходы / Фотоотчёты
+            const SizedBox(height: 12),
+            const Divider(height: 1, color: kBorder),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: _Metric(
+                    'OTS',
+                    c.ots != null
+                        ? NumberFormat.compact(locale: 'ru').format(c.ots)
+                        : '—',
+                  ),
+                ),
+                Expanded(
+                  child: _Metric(
+                    'Выходы',
+                    c.exits != null
+                        ? NumberFormat.compact(locale: 'ru').format(c.exits)
+                        : '—',
+                  ),
+                ),
+                Expanded(
+                  child: photoCoverage.maybeWhen(
+                    data: (coverage) => _Metric(
+                      'Фотоотчёты',
+                      '${coverage.percent.toStringAsFixed(0)}%',
                     ),
-                  if (c.ots != null && c.exits != null)
-                    const SizedBox(width: 24),
-                  if (c.exits != null)
-                    _Metric(
-                      'Выходы',
-                      NumberFormat.compact(locale: 'ru').format(c.exits),
-                    ),
-                ],
-              ),
-            ],
+                    orElse: () => const _Metric('Фотоотчёты', '—'),
+                  ),
+                ),
+              ],
+            ),
           ],
         ),
       ),
