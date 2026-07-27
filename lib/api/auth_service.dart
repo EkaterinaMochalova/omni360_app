@@ -18,6 +18,7 @@ class AuthService {
       throw Exception('Login response did not contain a token');
     }
     await _client.saveToken(token);
+    await _client.saveEmail(email);
     return token;
   }
 
@@ -28,6 +29,7 @@ class AuthService {
       // Ignore errors on logout — always clear local token
     } finally {
       await _client.deleteToken();
+      await _client.deleteEmail();
     }
   }
 
@@ -35,4 +37,6 @@ class AuthService {
     final token = await _client.getToken();
     return token != null && token.isNotEmpty;
   }
+
+  Future<String?> getSavedEmail() => _client.getEmail();
 }

@@ -4,6 +4,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 const _baseUrl = 'https://proddsp.omniboard360.io';
 const _tokenKey = 'auth_token';
+const _emailKey = 'auth_email';
 
 class Omni360Client {
   static final Omni360Client _instance = Omni360Client._internal();
@@ -48,6 +49,13 @@ class Omni360Client {
   Future<String?> getToken() => _storage.read(key: _tokenKey);
 
   Future<void> deleteToken() => _storage.delete(key: _tokenKey);
+
+  Future<void> saveEmail(String email) =>
+      _storage.write(key: _emailKey, value: email);
+
+  Future<String?> getEmail() => _storage.read(key: _emailKey);
+
+  Future<void> deleteEmail() => _storage.delete(key: _emailKey);
 
   static void _rewriteAnalyticsRequestForNetlify(RequestOptions options) {
     if (!kIsWeb || !_shouldUseNetlifyProxy(Uri.base.host)) {

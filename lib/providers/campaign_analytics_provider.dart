@@ -149,19 +149,37 @@ class CampaignAnalyticsController
   }
 
   Future<void> _loadFilters() async {
-    try {
-      final response = await _client.dio.get(
-        '/api/v1.0/clients/campaigns/$campaignId/filters-list',
-      );
-      state = state.copyWith(
-        filters: AsyncValue.data(
-          CampaignAnalyticsFiltersData.fromJson(
-            response.data as Map<String, dynamic>,
+    for (var attempt = 0; attempt < 2; attempt++) {
+      try {
+        final response = await _client.dio.get(
+          '/api/v1.0/clients/campaigns/$campaignId/filters-list',
+        );
+        state = state.copyWith(
+          filters: AsyncValue.data(
+            CampaignAnalyticsFiltersData.fromJson(
+              response.data as Map<String, dynamic>,
+            ),
           ),
-        ),
-      );
-    } catch (e, st) {
-      state = state.copyWith(filters: AsyncValue.error(e, st));
+        );
+        return;
+      } catch (e, st) {
+        final isRetryable =
+            e is DioException &&
+            (e.type == DioExceptionType.connectionTimeout ||
+                e.type == DioExceptionType.receiveTimeout ||
+                e.type == DioExceptionType.sendTimeout ||
+                [
+                  502,
+                  503,
+                  504,
+                ].contains(e.response?.statusCode));
+        if (isRetryable && attempt == 0) {
+          await Future<void>.delayed(const Duration(milliseconds: 250));
+          continue;
+        }
+        state = state.copyWith(filters: AsyncValue.error(e, st));
+        return;
+      }
     }
   }
 
@@ -346,11 +364,16 @@ class CampaignAnalyticsController
           lastError = e;
           final status = e.response?.statusCode ?? 0;
           final isRetryableStatus = status == 502 || status == 503 || status == 504;
-          if (isRetryableStatus && attempt == 0) {
-            // Временный сбой прокси/бэкенда — не в формате параметров дело,
-            // даём один шанс на повтор прежде чем переходить к следующему
-            // варианту (как уже сделано для этого же эндпоинта в
-            // service_dashboard_provider.dart).
+          final isRetryableTimeout =
+              e.type == DioExceptionType.connectionTimeout ||
+              e.type == DioExceptionType.receiveTimeout ||
+              e.type == DioExceptionType.sendTimeout;
+          if ((isRetryableStatus || isRetryableTimeout) && attempt == 0) {
+            // Временный сбой прокси/бэкенда (включая таймауты — прокси на
+            // Netlify сам иногда не укладывается в свой лимит и роняет
+            // соединение) — не в формате параметров дело, даём один шанс на
+            // повтор прежде чем переходить к следующему варианту (как уже
+            // сделано для этого же эндпоинта в service_dashboard_provider.dart).
             await Future<void>.delayed(const Duration(milliseconds: 250));
             continue;
           }

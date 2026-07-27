@@ -6,12 +6,15 @@ enum AuthStatus { unknown, authenticated, unauthenticated }
 class AuthState {
   final AuthStatus status;
   final String? error;
+  final String? email;
 
-  const AuthState({required this.status, this.error});
+  const AuthState({required this.status, this.error, this.email});
 
-  AuthState copyWith({AuthStatus? status, String? error}) => AuthState(
+  AuthState copyWith({AuthStatus? status, String? error, String? email}) =>
+      AuthState(
         status: status ?? this.status,
         error: error,
+        email: email ?? this.email,
       );
 }
 
@@ -24,8 +27,10 @@ class AuthNotifier extends StateNotifier<AuthState> {
 
   Future<void> _checkToken() async {
     final loggedIn = await _service.isLoggedIn();
+    final savedEmail = loggedIn ? await _service.getSavedEmail() : null;
     state = AuthState(
       status: loggedIn ? AuthStatus.authenticated : AuthStatus.unauthenticated,
+      email: savedEmail,
     );
   }
 
@@ -33,7 +38,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
     state = const AuthState(status: AuthStatus.unknown);
     try {
       await _service.login(email, password);
-      state = const AuthState(status: AuthStatus.authenticated);
+      state = AuthState(status: AuthStatus.authenticated, email: email);
     } catch (e) {
       state = AuthState(
         status: AuthStatus.unauthenticated,

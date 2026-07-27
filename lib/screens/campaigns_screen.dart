@@ -5,12 +5,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../main.dart';
 import '../models/campaign.dart';
-import '../providers/auth_provider.dart';
 import '../providers/campaigns_provider.dart';
 import '../services/app_notifications_service.dart';
 import '../services/local_order_store.dart';
 import '../utils/campaign_notifications.dart';
 import '../utils/pace_alerts.dart';
+import '../widgets/app_sidebar.dart';
 import '../widgets/campaign_summary_panel.dart';
 import '../widgets/reorderable_flex_wrap.dart';
 import 'budgets_pace_screen.dart';
@@ -53,7 +53,7 @@ class CampaignsScreen extends ConsumerStatefulWidget {
 }
 
 class _CampaignsScreenState extends ConsumerState<CampaignsScreen> {
-  String _filter = 'Все';
+  String _filter = 'Активна';
   CampaignSort _sort = CampaignSort.nameAsc;
   final _searchCtrl = TextEditingController();
   String _search = '';
@@ -448,6 +448,18 @@ class _CampaignsScreenState extends ConsumerState<CampaignsScreen> {
 
     return Scaffold(
       backgroundColor: kBg,
+      body: Row(
+        children: [
+          const AppSidebar(),
+          Expanded(child: _buildContent(context, campaigns)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildContent(BuildContext context, AsyncValue<List<Campaign>> campaigns) {
+    return Scaffold(
+      backgroundColor: kBg,
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 0,
@@ -568,15 +580,6 @@ class _CampaignsScreenState extends ConsumerState<CampaignsScreen> {
             onTap: () => ref.read(campaignsProvider.notifier).fetch(),
             child: const Icon(
               Icons.refresh_rounded,
-              color: kTextSecondary,
-              size: 20,
-            ),
-          ),
-          _HeaderActionButton(
-            tooltip: 'Выйти',
-            onTap: () => ref.read(authProvider.notifier).logout(),
-            child: const Icon(
-              Icons.logout_rounded,
               color: kTextSecondary,
               size: 20,
             ),
