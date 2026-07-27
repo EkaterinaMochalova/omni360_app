@@ -1,4 +1,5 @@
 import '../models/campaign.dart';
+import 'broadcast_schedule.dart';
 
 enum CampaignNoticeType { completed, noImpressionsLastHour }
 
@@ -31,13 +32,27 @@ bool isCampaignCompleted(Campaign campaign) =>
     isCampaignCompletedStatus(campaign.status) ||
     campaign.displayStatus == 'Завершена';
 
-bool wasCampaignActiveForLastHour(Campaign campaign, [DateTime? now]) {
+/// Вещала ли кампания непрерывно весь последний час.
+///
+/// [schedule] — расписание из детального ответа: в списочном `timeSettings`
+/// нет, а без него раньше кампания считалась активной круглосуточно, и
+/// «Нет показов последний час» приходило ночью, когда она законно молчит.
+/// Если расписание неизвестно, возвращаем false: пропущенное уведомление
+/// лучше ложной тревоги в три часа ночи.
+bool wasCampaignActiveForLastHour(
+  Campaign campaign, [
+  DateTime? now,
+  List<TimeSlot>? schedule,
+]) {
   final end = now ?? DateTime.now();
   if (!campaign.isActive || campaign.isNotOnSchedule) return false;
 
+  final slots = schedule ?? campaign.timeSettings;
+  if (!hasSchedule(slots)) return false;
+
   for (var minute = 1; minute <= 60; minute++) {
     final probe = end.subtract(Duration(minutes: minute));
-    if (!_isCampaignActiveAt(campaign, probe)) {
+    if (!_isCampaignActiveAt(campaign, probe, slots)) {
       return false;
     }
   }
@@ -45,20 +60,13 @@ bool wasCampaignActiveForLastHour(Campaign campaign, [DateTime? now]) {
   return true;
 }
 
-bool _isCampaignActiveAt(Campaign campaign, DateTime moment) {
+bool _isCampaignActiveAt(
+  Campaign campaign,
+  DateTime moment,
+  List<TimeSlot>? slots,
+) {
   if (!_isWithinCampaignDates(campaign, moment)) return false;
-
-  final slots = campaign.timeSettings;
-  if (slots == null || slots.isEmpty) return true;
-
-  final seconds = moment.hour * 3600 + moment.minute * 60 + moment.second;
-
-  return slots.any(
-    (slot) =>
-        slot.dayOfWeek == moment.weekday &&
-        seconds >= slot.relativeStartTime &&
-        seconds < slot.relativeEndTime,
-  );
+  return isWithinBroadcast(slots, moment);
 }
 
 bool _isWithinCampaignDates(Campaign campaign, DateTime moment) {

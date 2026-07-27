@@ -94,10 +94,16 @@ class BudgetsPaceScreen extends ConsumerWidget {
                     final spentOverride = (c.spent != null && c.spent! > 0)
                         ? c.spent!
                         : (cardStats?.factBudget ?? 0.0);
+                    // timeSettings нет в списочном ответе — догружаем из
+                    // детального, иначе лимиты считаются от круглых суток.
+                    final schedule = ref
+                        .watch(campaignScheduleProvider(c.id))
+                        .whenOrNull(data: (slots) => slots);
                     return CampaignPaceSummary.fromCampaign(
                       c,
                       today,
                       spentOverride: spentOverride,
+                      scheduleOverride: schedule,
                     );
                   })
                   .where((s) => s.totalDays > 0)

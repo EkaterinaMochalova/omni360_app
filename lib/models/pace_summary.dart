@@ -1,10 +1,5 @@
+import '../utils/broadcast_schedule.dart';
 import 'campaign.dart';
-
-const int _secondsPerDay = 86400;
-const int _secondsPerHour = 3600;
-
-/// Защита от бесконечного перебора, если endDate уехал далеко в будущее.
-const int _maxDaysScanned = 400;
 
 /// Индикация темпа освоения бюджета (см. легенду kontrazud_pacing.xlsx):
 /// красный <70% плана к сегодня, жёлтый 70–95%, зелёный ≥95%.
@@ -75,61 +70,6 @@ class CampaignPaceSummary {
     return DateTime.tryParse(raw.trim());
   }
 
-  /// Интервалы вещания (секунды от полуночи) на конкретный день недели.
-  /// Пересекающиеся и смежные слоты склеиваются, чтобы один и тот же час не
-  /// посчитался дважды. Пустой список — в этот день кампания не вещает.
-  static List<(int, int)> _slotsForWeekday(
-    List<TimeSlot>? slots,
-    int weekday,
-  ) {
-    if (slots == null || slots.isEmpty) {
-      return const [(0, _secondsPerDay)];
-    }
-
-    final day =
-        slots
-            .where((s) => s.dayOfWeek == weekday)
-            .map(
-              (s) => (
-                s.relativeStartTime.clamp(0, _secondsPerDay),
-                s.relativeEndTime.clamp(0, _secondsPerDay),
-              ),
-            )
-            .where((r) => r.$2 > r.$1)
-            .toList()
-          ..sort((a, b) => a.$1.compareTo(b.$1));
-
-    if (day.isEmpty) return const [];
-
-    final merged = <(int, int)>[day.first];
-    for (final range in day.skip(1)) {
-      final last = merged.last;
-      if (range.$1 <= last.$2) {
-        merged[merged.length - 1] = (
-          last.$1,
-          range.$2 > last.$2 ? range.$2 : last.$2,
-        );
-      } else {
-        merged.add(range);
-      }
-    }
-    return merged;
-  }
-
-  /// Секунды вещания на дате, начиная с [fromSecond] секунды суток.
-  static int _broadcastSecondsOnDate(
-    List<TimeSlot>? slots,
-    DateTime date, {
-    int fromSecond = 0,
-  }) {
-    var total = 0;
-    for (final range in _slotsForWeekday(slots, date.weekday)) {
-      final start = range.$1 > fromSecond ? range.$1 : fromSecond;
-      if (range.$2 > start) total += range.$2 - start;
-    }
-    return total;
-  }
-
   static int _inclusiveDays(DateTime start, DateTime end) {
     final s = DateTime(start.year, start.month, start.day);
     final e = DateTime(end.year, end.month, end.day);
@@ -141,6 +81,9 @@ class CampaignPaceSummary {
     Campaign campaign,
     DateTime today, {
     double? spentOverride,
+    // Расписание из детального ответа: в списочном timeSettings нет, поэтому
+    // экран догружает его отдельно и передаёт сюда.
+    List<TimeSlot>? scheduleOverride,
   }) {
     final start = _parseDate(campaign.startDate);
     final end = _parseDate(campaign.endDate);
@@ -175,37 +118,12 @@ class CampaignPaceSummary {
     final planToDate = totalDays == 0 ? 0.0 : budget / totalDays * daysPassed;
     final remaining = (budget - spent).clamp(0.0, double.infinity);
 
-    // Остаток вещания до конца кампании. Идём по каждому дню и складываем
-    // длительность его слотов, а не размах «первый старт — последний конец»:
-    // при перерыве внутри дня (например 8–12 и 18–22) размах насчитал бы 14
-    // рабочих часов вместо реальных 8 и занизил бы часовой лимит почти вдвое.
-    // Для сегодняшнего дня учитываем только ещё не прошедшие часы.
-    final schedule = campaign.timeSettings;
-    final todayDate = DateTime(today.year, today.month, today.day);
-    final nowSecond =
-        today.hour * _secondsPerHour + today.minute * 60 + today.second;
-    final daysToScan = daysLeft > _maxDaysScanned ? _maxDaysScanned : daysLeft;
-
-    var broadcastSecondsLeft = 0;
-    var broadcastDaysLeft = 0;
-    for (var i = 0; i < daysToScan; i++) {
-      // Через конструктор: day + i сам нормализует переход через конец месяца.
-      final date = DateTime(
-        todayDate.year,
-        todayDate.month,
-        todayDate.day + i,
-      );
-      final seconds = _broadcastSecondsOnDate(
-        schedule,
-        date,
-        fromSecond: i == 0 ? nowSecond : 0,
-      );
-      if (seconds <= 0) continue;
-      broadcastSecondsLeft += seconds;
-      broadcastDaysLeft++;
-    }
-
-    final broadcastHoursLeft = broadcastSecondsLeft / _secondsPerHour;
+    // Остаток вещания до конца кампании: складываем фактическую длительность
+    // слотов по каждому дню (за сегодня — только ещё не прошедшее время).
+    final schedule = scheduleOverride ?? campaign.timeSettings;
+    final left = broadcastHoursAndDays(schedule, today, end);
+    final broadcastHoursLeft = left.hours;
+    final broadcastDaysLeft = left.days;
 
     // Суточный лимит делим на дни, когда кампания действительно вещает:
     // если она стоит по выходным, размазывать остаток по календарным дням
@@ -220,7 +138,7 @@ class CampaignPaceSummary {
     return CampaignPaceSummary(
       broadcastHoursLeft: broadcastHoursLeft,
       broadcastDaysLeft: broadcastDaysLeft,
-      scheduleKnown: schedule != null && schedule.isNotEmpty,
+      scheduleKnown: hasSchedule(schedule),
       id: campaign.id,
       name: campaign.name,
       startDate: start,

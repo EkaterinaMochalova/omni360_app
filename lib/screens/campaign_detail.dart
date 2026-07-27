@@ -9,6 +9,7 @@ import '../widgets/reorderable_flex_wrap.dart';
 import 'campaign_analytics_screen.dart';
 import '../widgets/stats_chart.dart';
 import '../utils/pace_alerts.dart';
+import '../utils/broadcast_schedule.dart';
 
 const _kDetailOrderKey = 'omni360-detail-order';
 const _kDetailWidthsKey = 'omni360-detail-widths';
@@ -678,8 +679,12 @@ class _DetailedStatsCard extends StatelessWidget {
     String intNum(int? value) =>
         value != null && value > 0 ? fmtNum.format(value) : '—';
 
-    final planHourlyExits = ((campaign.exits ?? 0) > 0)
-        ? (campaign.exits! / 14)
+    // Выходы в час = общий план выходов ÷ часы вещания за весь срок кампании
+    // (по её расписанию), а не ÷ 14 зашитых часов: exits — это выходы за всю
+    // кампанию, и делить их как суточные значит завысить план в разы.
+    final totalHours = totalBroadcastHours(campaign);
+    final planHourlyExits = ((campaign.exits ?? 0) > 0 && totalHours != null)
+        ? (campaign.exits! / totalHours)
         : null;
 
     // /impression-stats (CampaignStats) — источник истины для плана: карточка

@@ -1,5 +1,5 @@
-import 'dart:math';
 import '../models/campaign.dart';
+import 'broadcast_schedule.dart';
 
 enum PaceType { over, under, noExits }
 
@@ -10,51 +10,36 @@ class PaceAlert {
   const PaceAlert(this.metric, this.type, this.pct);
 }
 
-/// Возвращает (startHour, endHour) активных часов кампании на сегодня.
-/// Если расписание не задано — fallback 0–24 (весь день).
-/// Если кампания сегодня не активна — возвращает null.
-(int start, int end)? activeHoursToday(Campaign campaign) {
-  final slots = campaign.timeSettings;
-  if (slots == null || slots.isEmpty) return (0, 24); // нет расписания — весь день
+/// Доля прошедшего вещания за сегодня, 0..1.
+/// 0 — вне окна вещания (слишком рано, поздно или сегодня не вещаем).
+///
+/// Считается по фактической длительности слотов: перерыв внутри дня не должен
+/// попадать в знаменатель, иначе доля прошедшего занижается и алерты врут.
+double expectedDayFraction(Campaign campaign, {List<TimeSlot>? schedule}) {
+  final slots = schedule ?? campaign.timeSettings;
+  final now = DateTime.now();
+  if (!isWithinBroadcast(slots, now)) return 0;
 
-  final today = DateTime.now().weekday; // 1=Пн…7=Вс
-  final todaySlots = slots.where((s) => s.dayOfWeek == today).toList();
-  if (todaySlots.isEmpty) return null; // кампания не работает сегодня
-
-  final start = todaySlots.map((s) => s.startHour).reduce(min);
-  final end = todaySlots.map((s) => s.endHour).reduce(max);
-  return (start, end);
-}
-
-/// Доля прошедшего дня в рамках активных часов кампании.
-/// 0 = вне активного окна (слишком рано, поздно или не тот день).
-double expectedDayFraction(Campaign campaign) {
-  final hours = activeHoursToday(campaign);
-  if (hours == null) return 0;
-  final (start, end) = hours;
-  final total = (end - start).toDouble();
+  final total = broadcastSecondsOnDate(slots, now);
   if (total <= 0) return 0;
 
-  final now = DateTime.now();
-  if (now.hour >= end || now.hour < start) return 0;
-
-  final elapsed = (now.hour + now.minute / 60 - start).clamp(0.0, total);
-  if (elapsed < 0.5) return 0;
+  final nowSecond = now.hour * secondsPerHour + now.minute * 60 + now.second;
+  final elapsed = total - broadcastSecondsOnDate(slots, now, fromSecond: nowSecond);
+  if (elapsed < 1800) return 0; // меньше получаса — статистика ещё ни о чём
   return elapsed / total;
 }
 
-/// Проверяет, находится ли текущее время в активном окне кампании.
-bool isWithinSchedule(Campaign campaign) {
-  final hours = activeHoursToday(campaign);
-  if (hours == null) return false;
-  final (start, end) = hours;
-  final h = DateTime.now().hour;
-  return h >= start && h < end;
-}
+/// Находится ли текущее время в окне вещания кампании.
+bool isWithinSchedule(Campaign campaign, {List<TimeSlot>? schedule}) =>
+    isWithinBroadcast(schedule ?? campaign.timeSettings, DateTime.now());
 
-List<PaceAlert> buildAlerts(Campaign campaign, CampaignStats s) {
+List<PaceAlert> buildAlerts(
+  Campaign campaign,
+  CampaignStats s, {
+  List<TimeSlot>? schedule,
+}) {
   final alerts = <PaceAlert>[];
-  final dayFraction = expectedDayFraction(campaign);
+  final dayFraction = expectedDayFraction(campaign, schedule: schedule);
   if (dayFraction <= 0) return alerts;
 
   void check(String label, double plan, double fact) {
@@ -93,8 +78,12 @@ List<PaceAlert> buildAlerts(Campaign campaign, CampaignStats s) {
     }
   }
 
-  // Выходы — только если план задан
-  final planHourlyExits = (campaign.exits ?? 0) / 14;
+  // Выходы — только если план задан. exits — выходы за всю кампанию, поэтому
+  // делим на часы вещания за весь срок, а не на зашитые 14 часов суток.
+  final totalHours = totalBroadcastHours(campaign, scheduleOverride: schedule);
+  final planHourlyExits = (totalHours != null && totalHours > 0)
+      ? (campaign.exits ?? 0) / totalHours
+      : 0.0;
   if (planHourlyExits > 0 && s.hourlyExitsFact > 0) {
     final pace = s.hourlyExitsFact / planHourlyExits;
     if (pace > 1.25) {
@@ -106,7 +95,8 @@ List<PaceAlert> buildAlerts(Campaign campaign, CampaignStats s) {
 
   // Нет выходов за последний час — кампания активна и в расписании, но тихо
   if (campaign.isActive && !campaign.isNotOnSchedule &&
-      isWithinSchedule(campaign) && s.factExits > 0 && s.hourlyExitsFact == 0) {
+      isWithinSchedule(campaign, schedule: schedule) &&
+      s.factExits > 0 && s.hourlyExitsFact == 0) {
     alerts.add(PaceAlert('Выходы', PaceType.noExits, 0));
   }
 

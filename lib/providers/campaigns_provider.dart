@@ -111,6 +111,37 @@ final campaignDetailProvider = FutureProvider.family<Campaign, String>((
   return campaign;
 });
 
+// --- Расписание вещания ---
+
+/// `timeSettings` приходит только в детальном ответе по кампании, в списочном
+/// его нет. Поэтому экраны, работающие со списком (таблица темпов, проверка
+/// уведомлений), берут расписание отсюда. Отдельный провайдер, а не
+/// campaignDetailProvider: тот печатает в консоль весь массив сегментов, что
+/// на десятке кампаний превращается в мусор, и тянет модель целиком.
+///
+/// Riverpod кеширует результат по id, так что на экран это один запрос на
+/// кампанию — расписание меняется редко, перезапрашивать его незачем.
+final campaignScheduleProvider =
+    FutureProvider.family<List<TimeSlot>?, String>((ref, id) async {
+      try {
+        final response = await Omni360Client().dio.get(
+          '/api/v1.0/clients/campaigns/$id',
+        );
+        final data = response.data;
+        if (data is! Map<String, dynamic>) return null;
+        final raw = data['timeSettings'];
+        if (raw is! List) return null;
+        return raw
+            .whereType<Map<String, dynamic>>()
+            .map(TimeSlot.fromJson)
+            .toList();
+      } on DioException {
+        // Расписание неизвестно — вызывающий код обязан это учесть, а не
+        // молча считать, что кампания вещает круглые сутки.
+        return null;
+      }
+    });
+
 // --- Campaign stats via GET /impression-stats ---
 
 final campaignStatsProvider = FutureProvider.family<CampaignStats, String>((

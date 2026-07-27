@@ -174,10 +174,19 @@ class _CampaignsScreenState extends ConsumerState<CampaignsScreen> {
       }
 
       final now = DateTime.now();
-      final activeCampaigns = campaigns.where(
-        (campaign) => wasCampaignActiveForLastHour(campaign, now),
+      // Расписание есть только в детальном ответе, поэтому проверяем окно
+      // вещания уже после его загрузки — иначе кампания без timeSettings
+      // считалась вещающей круглосуточно и уведомление приходило ночью.
+      final candidates = campaigns.where(
+        (campaign) => campaign.isActive && !campaign.isNotOnSchedule,
       );
-      for (final campaign in activeCampaigns) {
+      for (final campaign in candidates) {
+        final schedule = await ref.read(
+          campaignScheduleProvider(campaign.id).future,
+        );
+        if (!mounted) return;
+        if (!wasCampaignActiveForLastHour(campaign, now, schedule)) continue;
+
         final stats = await ref.refresh(
           campaignStatsProvider(campaign.id).future,
         );
