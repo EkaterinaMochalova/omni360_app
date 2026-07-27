@@ -764,9 +764,9 @@ class _DetailedStatRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final delta = row.ratio == null
+    final completion = row.ratio == null
         ? null
-        : '${row.ratio! >= 1 ? '+' : ''}${((row.ratio! - 1) * 100).toStringAsFixed(0)}%';
+        : '% выполнения плана: ${(row.ratio! * 100).toStringAsFixed(0)}%';
     final deltaColor = row.ratio == null
         ? kTextSecondary
         : row.ratio! > 1.05
@@ -815,7 +815,7 @@ class _DetailedStatRow extends StatelessWidget {
               ),
             ],
           ),
-          if (delta != null) ...[
+          if (completion != null) ...[
             const SizedBox(height: 6),
             Row(
               children: [
@@ -830,7 +830,7 @@ class _DetailedStatRow extends StatelessWidget {
                     borderRadius: BorderRadius.circular(999),
                   ),
                   child: Text(
-                    delta,
+                    completion,
                     style: TextStyle(
                       color: deltaColor,
                       fontSize: 11,

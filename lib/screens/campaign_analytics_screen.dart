@@ -510,6 +510,12 @@ class _AnalyticsBody extends StatelessWidget {
                     value: '${(lossRate * 100).toStringAsFixed(1)}%',
                   ),
                 _MetricCard(label: 'Успешные показы', value: '$successes'),
+                _MetricCard(
+                  label: '% успешных показов',
+                  value: aggregate.totalRequests == 0
+                      ? '—'
+                      : '${(successes / aggregate.totalRequests * 100).toStringAsFixed(1)}%',
+                ),
               ],
             ),
           ),
@@ -674,7 +680,7 @@ class _BreakdownRow extends StatelessWidget {
                 ),
               ),
               Text(
-                '$value',
+                '$value (${(ratio * 100).toStringAsFixed(1)}%)',
                 style: const TextStyle(
                   color: kTextPrimary,
                   fontWeight: FontWeight.w700,
