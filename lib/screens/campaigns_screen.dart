@@ -944,10 +944,18 @@ class _CampaignCard extends ConsumerWidget {
     );
     final c = campaign;
 
-    final cardStats = (c.isActive || c.spent == null)
+    // Фотоотчёты и статистика тянут по кампании до 20 последовательных
+    // страниц с бэкенда каждая — на списке из многих карточек это залпом
+    // грузит и так нестабильный бэкенд/прокси и валит всё таймаутами
+    // (включая соседние экраны). Считаем только для активных кампаний, как
+    // уже сделано для cardStats.
+    final shouldLoadDetails = c.isActive || c.spent == null;
+    final cardStats = shouldLoadDetails
         ? ref.watch(campaignStatsProvider(c.id)).whenOrNull(data: (s) => s)
         : null;
-    final photoCoverage = ref.watch(campaignPhotoCoverageProvider(c.id));
+    final photoCoverage = shouldLoadDetails
+        ? ref.watch(campaignPhotoCoverageProvider(c.id))
+        : const AsyncValue<CampaignPhotoCoverage>.loading();
     final effectiveSpent = (c.spent != null && c.spent! > 0)
         ? c.spent
         : (cardStats != null && cardStats.factBudget > 0
