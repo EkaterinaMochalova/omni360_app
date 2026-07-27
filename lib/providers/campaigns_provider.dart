@@ -92,11 +92,13 @@ final campaignDetailProvider = FutureProvider.family<Campaign, String>((
   print(
     '[DEBUG detail] maxImpressionsCount=${data['maxImpressionsCount']} maxDailyImpressionsCount=${data['maxDailyImpressionsCount']}',
   );
+  final campaign = Campaign.fromJson(data);
   // ignore: avoid_print
   print(
-    '[DEBUG detail] strategy=${data['strategy']} segments=${data['segments']}',
+    '[DEBUG detail] strategy=${data['strategy']} '
+    'сегментов=${(data['segments'] as List?)?.length} '
+    'слотов расписания=${campaign.timeSettings?.length}',
   );
-  final campaign = Campaign.fromJson(data);
   // Плановый OTS кампании берётся первым делом из maxImpressionsCount —
   // печатаем всех кандидатов рядом с результатом, чтобы проверить, что это
   // действительно контакты, а не лимит выходов, и что единицы совпадают
@@ -131,38 +133,9 @@ final campaignScheduleProvider =
         final data = response.data;
         if (data is! Map) return null;
 
-        final raw = data['timeSettings'];
-        // Через whereType<Map>() + cast, а не прямой каст к
-        // Map<String, dynamic>: вложенные объекты не всегда приходят с этим
-        // типом, и строгий фильтр молча выбросил бы все слоты.
-        final slots = raw is List
-            ? raw
-                  .whereType<Map>()
-                  .map((e) => TimeSlot.fromJson(e.cast<String, dynamic>()))
-                  .toList()
-            : <TimeSlot>[];
-
-        if (slots.isEmpty) {
-          // Пустой timeSettings — штатная ситуация (нет таргетинга по
-          // времени). Разово подсматриваем, не лежит ли расписание в
-          // сегментах: у части кампаний таргетинг задают на их уровне.
-          final segments = data['segments'];
-          final firstSegment =
-              (segments is List && segments.isNotEmpty && segments.first is Map)
-              ? segments.first as Map
-              : null;
-          // ignore: avoid_print
-          print(
-            '[schedule $id] timeSettings пустой → круглые сутки. '
-            'сегментов=${segments is List ? segments.length : 0} '
-            'ключи сегмента=${firstSegment?.keys.toList()} '
-            'время в сегменте: ${_timeishFields(firstSegment)} | '
-            'budgetConfig=${data['budgetConfig']} '
-            'maxHourly=${data['maxHourlyImpressionsCount']}',
-          );
-        }
-
-        return BroadcastSchedule(slots);
+        // Расписание лежит не на верхнем уровне, а внутри сегментов — ищем
+        // рекурсивно тем же сборщиком, что и модель кампании.
+        return BroadcastSchedule(TimeSlot.collectFrom(data));
       } catch (e) {
         // Ловим всё, а не только DioException: ошибка разбора давала такой же
         // безмолвный null, что и успешная загрузка пустого расписания.
@@ -171,23 +144,6 @@ final campaignScheduleProvider =
         return null;
       }
     });
-
-/// Поля, похожие на временные, — чтобы найти таргетинг по времени, если он
-/// задан не на уровне кампании.
-String _timeishFields(Map? source) {
-  if (source == null) return 'нет сегмента';
-  final hits = <String>[];
-  source.forEach((key, value) {
-    final name = key.toString().toLowerCase();
-    if (name.contains('time') ||
-        name.contains('schedule') ||
-        name.contains('hour') ||
-        name.contains('day')) {
-      hits.add('$key=$value');
-    }
-  });
-  return hits.isEmpty ? 'нет' : hits.join(' ');
-}
 
 // --- Campaign stats via GET /impression-stats ---
 

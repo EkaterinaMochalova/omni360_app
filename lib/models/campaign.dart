@@ -20,6 +20,46 @@ class TimeSlot {
     relativeStartTime: Campaign._toInt(json['relativeStartTime']) ?? 0,
     relativeEndTime: Campaign._toInt(json['relativeEndTime']) ?? 86400,
   );
+
+  /// Собирает слоты расписания из ответа по кампании на любой глубине.
+  ///
+  /// `timeSettings` на верхнем уровне приходит пустым, а фактическое
+  /// расписание задано глубже — на уровне сегментов. Поэтому ищем рекурсивно,
+  /// а не по фиксированному пути: где именно оно лежит, зависит от кампании.
+  ///
+  /// Слоты из разных сегментов объединяем: кампания вещает, когда активен
+  /// любой из них. Пересечения и стыки склеиваются уже при расчёте часов.
+  static List<TimeSlot> collectFrom(dynamic node) {
+    final found = <TimeSlot>[];
+    final seen = <String>{};
+
+    void walk(dynamic current, int depth) {
+      if (depth > 8) return;
+      if (current is Map) {
+        final raw = current['timeSettings'];
+        if (raw is List) {
+          for (final entry in raw) {
+            if (entry is! Map) continue;
+            final slot = TimeSlot.fromJson(entry.cast<String, dynamic>());
+            if (slot.relativeEndTime <= slot.relativeStartTime) continue;
+            final key = '${slot.dayOfWeek}:'
+                '${slot.relativeStartTime}:${slot.relativeEndTime}';
+            if (seen.add(key)) found.add(slot);
+          }
+        }
+        for (final value in current.values) {
+          walk(value, depth + 1);
+        }
+      } else if (current is List) {
+        for (final value in current) {
+          walk(value, depth + 1);
+        }
+      }
+    }
+
+    walk(node, 0);
+    return found;
+  }
 }
 
 class Campaign {
@@ -120,9 +160,7 @@ class Campaign {
       displayOwners: displayOwners.$2,
       displayOwnerNameToId: displayOwnerNameToId,
       formats: _extractFormats(json),
-      timeSettings: (json['timeSettings'] as List?)
-          ?.map((e) => TimeSlot.fromJson(e as Map<String, dynamic>))
-          .toList(),
+      timeSettings: TimeSlot.collectFrom(json),
     );
   }
 
