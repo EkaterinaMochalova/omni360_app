@@ -57,6 +57,10 @@ class BidRaiseRow {
   final double lastBid;
   final double bidFloor;
 
+  /// Максимальная ставка, выигравшая аукцион на этой поверхности, — из текста
+  /// причины отклонения. null, если ни в одной причине её не назвали.
+  final double? maxWinningBid;
+
   const BidRaiseRow({
     required this.inventoryGid,
     required this.address,
@@ -66,10 +70,45 @@ class BidRaiseRow {
     required this.lossCount,
     required this.lastBid,
     required this.bidFloor,
+    this.maxWinningBid,
   });
 
-  /// Небольшой запас 2%, чтобы не проигрывать по границе.
-  double get recommendedBid => (bidFloor * 1.02);
+  /// Шаг, на который перебиваем чужую ставку.
+  static const double bidStep = 0.1;
+
+  /// Рекомендуемая ставка.
+  ///
+  /// Считаем от максимальной выигравшей ставки: перебить надо того, кто
+  /// реально забрал показ, а не минимальную ставку — она бывает ниже нашей
+  /// текущей, и тогда рекомендация получалась ниже уже выставленной, то есть
+  /// бессмысленной. Ниже текущей ставки не опускаемся никогда: мы проигрываем
+  /// с ней, значит поднимать надо вверх.
+  double get recommendedBid {
+    var target = lastBid;
+
+    final winning = maxWinningBid;
+    if (winning != null && winning > 0) {
+      target = _atLeast(target, winning + bidStep);
+    }
+    if (bidFloor > 0) {
+      target = _atLeast(target, bidFloor + bidStep);
+    }
+
+    // Ничего не известно, кроме того, что текущая ставка проигрывает.
+    if (target <= lastBid) return lastBid + bidStep;
+    return target;
+  }
+
+  /// Насколько рекомендация выше текущей ставки.
+  double get raiseBy => recommendedBid - lastBid;
+
+  /// Опирается ли рекомендация на реальную выигравшую ставку, или это лишь
+  /// шаг от минимума. Показываем в интерфейсе, чтобы не выдавать догадку за
+  /// расчёт по данным аукциона.
+  bool get basedOnWinningBid => (maxWinningBid ?? 0) > 0;
+
+  static double _atLeast(double current, double candidate) =>
+      candidate > current ? candidate : current;
 }
 
 /// Одна затронутая поверхность внутри группы причины/оператора/города —
@@ -222,6 +261,21 @@ class LossReportBuilder {
       (r) => r.isLoss && classifyLoss(r) == LossCategory.lowBid,
     );
 
+    // Формулировка причины отклонения в АПИ не зафиксирована, а от неё зависит
+    // разбор выигравшей ставки. Печатаем несколько разных сообщений вместе с
+    // тем, что из них удалось вытащить, — так видно, верно ли мы их читаем.
+    final samples = <String, double?>{};
+    for (final record in lossRecords) {
+      final message = record.failureReasonMessage;
+      if (message == null || message.trim().isEmpty) continue;
+      if (samples.length >= 3) break;
+      samples.putIfAbsent(message, () => winningBidFromReason(record));
+    }
+    if (samples.isNotEmpty) {
+      // ignore: avoid_print
+      print('[bid raise] причины отклонения → выигравшая ставка: $samples');
+    }
+
     final byKey =
         <(String, String, String, String, String), List<CampaignImpressionRecord>>{};
     for (final r in lossRecords) {
@@ -244,6 +298,16 @@ class LossReportBuilder {
       );
       final last = latest.last;
 
+      // Берём максимум по всем проигрышам на этой поверхности, а не только по
+      // последнему: перебить нужно самую высокую ставку конкурента, иначе на
+      // следующем же аукционе проиграем снова.
+      double? maxWinning;
+      for (final record in rows) {
+        final winning = winningBidFromReason(record);
+        if (winning == null) continue;
+        if (maxWinning == null || winning > maxWinning) maxWinning = winning;
+      }
+
       return BidRaiseRow(
         inventoryGid: inventoryGid,
         address: address,
@@ -253,6 +317,7 @@ class LossReportBuilder {
         lossCount: rows.length,
         lastBid: last.bid ?? 0,
         bidFloor: last.bidFloor ?? 0,
+        maxWinningBid: maxWinning,
       );
     }).toList()..sort((a, b) => b.lossCount.compareTo(a.lossCount));
 

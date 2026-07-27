@@ -167,6 +167,28 @@ enum LossCategory {
 /// он будет обработан первым без изменений в остальном коде.
 /// TODO: сверить с реальными показами — всегда ли bid/bidFloor заполнены
 /// у FAILED-записей, и встречается ли явный код причины "низкая ставка".
+/// Числа в тексте причины отклонения — там указывается выигравшая ставка.
+final _numberInText = RegExp(r'\d+(?:[.,]\d+)?');
+
+/// Выигравшая ставка из причины отклонения, если она там названа.
+///
+/// Точная формулировка сообщения не зафиксирована в АПИ, поэтому берём
+/// наибольшее число в тексте: ставка — единственная крупная величина в таких
+/// сообщениях, а мелкие (номер попытки, код) её не перебьют. Если чисел нет
+/// вовсе — возвращаем null, и рекомендация считается от минимальной ставки.
+double? winningBidFromReason(CampaignImpressionRecord record) {
+  final message = record.failureReasonMessage;
+  if (message == null || message.trim().isEmpty) return null;
+
+  double? best;
+  for (final match in _numberInText.allMatches(message)) {
+    final value = double.tryParse(match.group(0)!.replaceAll(',', '.'));
+    if (value == null) continue;
+    if (best == null || value > best) best = value;
+  }
+  return best;
+}
+
 LossCategory classifyLoss(CampaignImpressionRecord record) {
   final code = record.failureReasonCodeName?.toUpperCase() ?? '';
   final type = record.failureReasonType?.toUpperCase() ?? '';

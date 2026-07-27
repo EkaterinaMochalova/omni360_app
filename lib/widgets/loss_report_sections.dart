@@ -173,6 +173,7 @@ class BidRaiseReportSection extends StatelessWidget {
                   DataColumn(label: Text('Проигрышей'), numeric: true),
                   DataColumn(label: Text('Ставка'), numeric: true),
                   DataColumn(label: Text('Мин. ставка'), numeric: true),
+                  DataColumn(label: Text('Выигравшая'), numeric: true),
                   DataColumn(label: Text('Рекомендуем')),
                 ],
                 rows: rows
@@ -193,10 +194,28 @@ class BidRaiseReportSection extends StatelessWidget {
                           DataCell(Text(_fmtRub.format(r.bidFloor))),
                           DataCell(
                             Text(
-                              _fmtRub.format(r.recommendedBid),
-                              style: const TextStyle(
-                                color: kAccent,
-                                fontWeight: FontWeight.w600,
+                              r.basedOnWinningBid
+                                  ? _fmtRub.format(r.maxWinningBid)
+                                  : '—',
+                            ),
+                          ),
+                          DataCell(
+                            Tooltip(
+                              message: r.basedOnWinningBid
+                                  ? 'Максимальная выигравшая ставка '
+                                        '${_fmtRub.format(r.maxWinningBid)} '
+                                        '+ ${BidRaiseRow.bidStep}'
+                                  : 'Выигравшая ставка в причине отклонения не '
+                                        'указана — считаем от минимальной ставки',
+                              child: Text(
+                                '${_fmtRub.format(r.recommendedBid)}'
+                                '  (+${_fmtRub.format(r.raiseBy)})',
+                                style: TextStyle(
+                                  color: r.basedOnWinningBid
+                                      ? kAccent
+                                      : kTextSecondary,
+                                  fontWeight: FontWeight.w600,
+                                ),
                               ),
                             ),
                           ),
