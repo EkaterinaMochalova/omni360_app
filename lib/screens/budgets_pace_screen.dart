@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import '../main.dart';
 import '../models/pace_summary.dart';
 import '../providers/campaigns_provider.dart';
+import '../widgets/app_sidebar.dart';
 
 final _fmtRub = NumberFormat.currency(
   locale: 'ru_RU',
@@ -44,7 +45,9 @@ class BudgetsPaceScreen extends ConsumerWidget {
     final campaignsState = ref.watch(campaignsProvider);
     final today = DateTime.now();
 
-    return Scaffold(
+    return AppShell(
+      section: AppSection.budgetsPace,
+      child: Scaffold(
       backgroundColor: kBg,
       appBar: AppBar(
         backgroundColor: Colors.white,
@@ -192,6 +195,7 @@ class BudgetsPaceScreen extends ConsumerWidget {
             ),
           );
         },
+      ),
       ),
     );
   }

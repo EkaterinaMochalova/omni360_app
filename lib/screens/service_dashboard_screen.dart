@@ -6,6 +6,7 @@ import '../main.dart';
 import '../models/campaign.dart';
 import '../models/service_dashboard.dart';
 import '../providers/service_dashboard_provider.dart';
+import '../widgets/app_sidebar.dart';
 
 class ServiceDashboardScreen extends ConsumerWidget {
   const ServiceDashboardScreen({super.key});
@@ -21,7 +22,9 @@ class ServiceDashboardScreen extends ConsumerWidget {
       filters: state.filters,
     );
 
-    return Scaffold(
+    return AppShell(
+      section: AppSection.serviceDashboard,
+      child: Scaffold(
       backgroundColor: kBg,
       appBar: AppBar(
         backgroundColor: Colors.white,
@@ -242,6 +245,7 @@ class ServiceDashboardScreen extends ConsumerWidget {
             ),
           ),
         ],
+      ),
       ),
     );
   }

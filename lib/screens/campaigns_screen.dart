@@ -13,9 +13,7 @@ import '../utils/pace_alerts.dart';
 import '../widgets/app_sidebar.dart';
 import '../widgets/campaign_summary_panel.dart';
 import '../widgets/reorderable_flex_wrap.dart';
-import 'budgets_pace_screen.dart';
-import 'campaign_create.dart';
-import 'service_dashboard_screen.dart';
+// Переходы в сервисный дашборд и бюджеты/темпы живут в AppSidebar.
 
 const _kCampaignsOrderKey = 'omni360-campaigns-order';
 
@@ -459,7 +457,7 @@ class _CampaignsScreenState extends ConsumerState<CampaignsScreen> {
       backgroundColor: kBg,
       body: Row(
         children: [
-          const AppSidebar(),
+          const AppSidebar(current: AppSection.campaigns),
           Expanded(child: _buildContent(context, campaigns)),
         ],
       ),
@@ -482,34 +480,7 @@ class _CampaignsScreenState extends ConsumerState<CampaignsScreen> {
         ),
         titleSpacing: 16,
         actions: [
-          _HeaderActionButton(
-            tooltip: 'Сервисный дашборд',
-            onTap: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => const ServiceDashboardScreen(),
-                ),
-              );
-            },
-            child: const Icon(
-              Icons.space_dashboard_rounded,
-              color: kTextSecondary,
-              size: 20,
-            ),
-          ),
-          _HeaderActionButton(
-            tooltip: 'Бюджеты и темпы',
-            onTap: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const BudgetsPaceScreen()),
-              );
-            },
-            child: const Icon(
-              Icons.speed_rounded,
-              color: kTextSecondary,
-              size: 20,
-            ),
-          ),
+          // Переходы на сервисный дашборд и бюджеты/темпы переехали в сайдбар.
           _HeaderActionButton(
             tooltip: _notificationsEnabled
                 ? 'Уведомления'
@@ -571,18 +542,6 @@ class _CampaignsScreenState extends ConsumerState<CampaignsScreen> {
               ),
             ),
             orElse: () => const SizedBox.shrink(),
-          ),
-          _HeaderActionButton(
-            tooltip: 'Создать кампанию',
-            onTap: () async {
-              final created = await Navigator.of(context).push<bool>(
-                MaterialPageRoute(builder: (_) => const CampaignCreateScreen()),
-              );
-              if (created == true && context.mounted) {
-                ref.read(campaignsProvider.notifier).fetch();
-              }
-            },
-            child: const Icon(Icons.add_rounded, color: kAccent, size: 21),
           ),
           _HeaderActionButton(
             tooltip: 'Обновить',
