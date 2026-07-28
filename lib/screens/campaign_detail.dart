@@ -246,6 +246,32 @@ class _CampaignDetailScreenState extends ConsumerState<CampaignDetailScreen> {
                 },
                 onRefresh: analyticsController.fetchImpressions,
               ),
+              // Пока что-то грузится, это должно быть видно: без полоски и
+              // подписи недогруженный дашборд выглядит просто пустым.
+              if (analytics.impressions.isLoading ||
+                  analytics.allRecords.isLoading)
+                Column(
+                  children: [
+                    const LinearProgressIndicator(
+                      minHeight: 2,
+                      color: kAccent,
+                      backgroundColor: Color(0xFFE3E7EE),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 6),
+                      child: Text(
+                        analytics.impressions.isLoading
+                            ? 'Загружаем аналитику за выбранный период…'
+                            : 'Дашборд готов, догружаем полную выгрузку '
+                                  'показов для отчётов…',
+                        style: const TextStyle(
+                          color: kTextSecondary,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               if (analytics.impressions.hasError)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),

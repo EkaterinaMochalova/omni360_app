@@ -172,24 +172,23 @@ class CampaignAnalyticsController
       allRecords: const AsyncValue.loading(),
     );
 
-    try {
-      final query = state.query;
-      final results = await Future.wait([
-        _fetchPage(query),
-        _fetchAggregateWithRecords(query),
-      ]);
-      final response = results[0];
-      final (aggregate, allRecords) =
-          results[1] as (CampaignAnalyticsAggregate, List<CampaignImpressionRecord>);
+    // Первая страница и полная выгрузка всех записей — независимые запросы, и
+    // ждать их вместе было ошибкой: дашборд не показывался, пока не скачается
+    // вся выгрузка, а её таймаут ронял заодно и лёгкую первую страницу.
+    // Теперь каждая часть кладёт свой результат сама, как только готова.
+    final query = state.query;
+    await Future.wait([_loadFirstPage(query), _loadAggregateAndRecords(query)]);
+  }
 
+  Future<void> _loadFirstPage(CampaignAnalyticsQuery query) async {
+    try {
+      final response = await _fetchPage(query);
       state = state.copyWith(
         impressions: AsyncValue.data(
           CampaignImpressionsPage.fromJson(
             response.data as Map<String, dynamic>,
           ),
         ),
-        aggregate: AsyncValue.data(aggregate),
-        allRecords: AsyncValue.data(allRecords),
       );
     } on DioException catch (e, st) {
       final serverDetails = _extractServerDetails(e);
@@ -198,18 +197,28 @@ class CampaignAnalyticsController
           serverDetails == null ? e : Exception(serverDetails),
           st,
         ),
-        aggregate: AsyncValue.error(
-          serverDetails == null ? e : Exception(serverDetails),
-          st,
-        ),
-        allRecords: AsyncValue.error(
-          serverDetails == null ? e : Exception(serverDetails),
-          st,
-        ),
+      );
+    } catch (e, st) {
+      state = state.copyWith(impressions: AsyncValue.error(e, st));
+    }
+  }
+
+  Future<void> _loadAggregateAndRecords(CampaignAnalyticsQuery query) async {
+    try {
+      final (aggregate, allRecords) = await _fetchAggregateWithRecords(query);
+      state = state.copyWith(
+        aggregate: AsyncValue.data(aggregate),
+        allRecords: AsyncValue.data(allRecords),
+      );
+    } on DioException catch (e, st) {
+      final serverDetails = _extractServerDetails(e);
+      final error = serverDetails == null ? e : Exception(serverDetails);
+      state = state.copyWith(
+        aggregate: AsyncValue.error(error, st),
+        allRecords: AsyncValue.error(error, st),
       );
     } catch (e, st) {
       state = state.copyWith(
-        impressions: AsyncValue.error(e, st),
         aggregate: AsyncValue.error(e, st),
         allRecords: AsyncValue.error(e, st),
       );

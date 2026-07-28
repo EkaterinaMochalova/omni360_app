@@ -13,6 +13,7 @@ final _fmtRub = NumberFormat.currency(
   decimalDigits: 0,
 );
 final _fmtDate = DateFormat('dd.MM.yyyy');
+final _fmtDayMonth = DateFormat('dd.MM');
 final _fmtHours = NumberFormat('#,##0.#', 'ru_RU');
 
 Color _statusColor(PaceStatus status) {
@@ -146,17 +147,15 @@ class BudgetsPaceScreen extends ConsumerWidget {
                   dataRowMaxHeight: 56,
                   columns: const [
                     DataColumn(label: Text('Кампания')),
-                    DataColumn(label: Text('Начало')),
-                    DataColumn(label: Text('Конец')),
+                    DataColumn(label: Text('Период')),
                     DataColumn(label: Text('Бюджет'), numeric: true),
                     DataColumn(label: Text('Факт'), numeric: true),
                     DataColumn(label: Text('% освоено'), numeric: true),
-                    DataColumn(label: Text('План к сегодня'), numeric: true),
                     DataColumn(label: Text('Сейчас: факт / план'), numeric: true),
                     DataColumn(label: Text('Не хватает'), numeric: true),
                     DataColumn(label: Text('Темп'), numeric: true),
                     DataColumn(label: Text('Остаток'), numeric: true),
-                    DataColumn(label: Text('Дней осталось'), numeric: true),
+                    DataColumn(label: Text('Ост. дней'), numeric: true),
                     DataColumn(label: Text('Лимит/сутки'), numeric: true),
                     DataColumn(label: Text('Лимит/час'), numeric: true),
                   ],
@@ -169,7 +168,6 @@ class BudgetsPaceScreen extends ConsumerWidget {
                           Text('ИТОГО', style: TextStyle(fontWeight: FontWeight.bold)),
                         ),
                         const DataCell(Text('')),
-                        const DataCell(Text('')),
                         DataCell(Text(_fmtRub.format(totalBudget))),
                         DataCell(Text(_fmtRub.format(totalSpent))),
                         DataCell(
@@ -179,7 +177,6 @@ class BudgetsPaceScreen extends ConsumerWidget {
                                 : '${(totalSpent / totalBudget * 100).toStringAsFixed(1)}%',
                           ),
                         ),
-                        DataCell(Text(_fmtRub.format(totalPlanToDate))),
                         DataCell(
                           Text(
                             '${_fmtRub.format(totalSpent)} / '
@@ -234,12 +231,10 @@ class BudgetsPaceScreen extends ConsumerWidget {
             child: Text(s.name, overflow: TextOverflow.ellipsis, maxLines: 2),
           ),
         ),
-        DataCell(Text(s.startDate != null ? _fmtDate.format(s.startDate!) : '—')),
-        DataCell(Text(s.endDate != null ? _fmtDate.format(s.endDate!) : '—')),
+        DataCell(_periodChip(s)),
         DataCell(Text(_fmtRub.format(s.budget))),
         DataCell(Text(_fmtRub.format(s.spent))),
         DataCell(Text('${(s.pctSpent * 100).toStringAsFixed(1)}%')),
-        DataCell(Text(_fmtRub.format(s.planToDate))),
         DataCell(
           Tooltip(
             message:
@@ -268,7 +263,15 @@ class BudgetsPaceScreen extends ConsumerWidget {
           ),
         ),
         DataCell(Text(_fmtRub.format(s.remainingBudget))),
-        DataCell(Text('${s.daysLeft}')),
+        DataCell(
+          Tooltip(
+            message: s.scheduleResolved && s.hasTimeRestrictions
+                ? '${s.daysLeft} календарных, из них ${s.broadcastDaysLeft} '
+                      'с вещанием'
+                : '${s.daysLeft} календарных дн. до конца кампании',
+            child: Text('${s.daysLeft}'),
+          ),
+        ),
         DataCell(
           Tooltip(
             message: _limitHint(
@@ -296,6 +299,33 @@ class BudgetsPaceScreen extends ConsumerWidget {
           ),
         ),
       ],
+    );
+  }
+
+  /// Даты кампании одной компактной плашкой: две отдельные колонки съедали
+  /// заметно больше ширины, чем несут смысла.
+  Widget _periodChip(CampaignPaceSummary s) {
+    final start = s.startDate;
+    final end = s.endDate;
+    if (start == null && end == null) return const Text('—');
+
+    final sameYear = start != null && end != null && start.year == end.year;
+    final left = start == null
+        ? '—'
+        : (sameYear ? _fmtDayMonth : _fmtDate).format(start);
+    final right = end == null ? '—' : _fmtDate.format(end);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: kBg,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: kBorder),
+      ),
+      child: Text(
+        '$left – $right',
+        style: const TextStyle(fontSize: 12, color: kTextSecondary),
+      ),
     );
   }
 

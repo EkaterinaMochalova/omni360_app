@@ -374,6 +374,43 @@ const kAnalyticsBlockIds = [
 
 typedef DashboardBlock = ({String id, bool isWide, Widget child});
 
+/// Блок, который зависит от полной выгрузки показов: пока она грузится или
+/// если она отвалилась, показываем состояние вместо пустой таблицы.
+Widget _fromAllRecords(
+  AsyncValue<List<CampaignImpressionRecord>> records,
+  String title,
+  Widget Function() build,
+) {
+  return records.when(
+    data: (_) => build(),
+    loading: () => CardSection(
+      title: title,
+      subtitle: 'Считаем по всем показам за период',
+      child: const Padding(
+        padding: EdgeInsets.symmetric(vertical: 20),
+        child: Center(
+          child: SizedBox(
+            width: 22,
+            height: 22,
+            child: CircularProgressIndicator(color: kAccent, strokeWidth: 2.5),
+          ),
+        ),
+      ),
+    ),
+    error: (e, _) => CardSection(
+      title: title,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        child: Text(
+          'Не удалось загрузить полную выгрузку показов за период.\n'
+          'Попробуйте сузить период — обычно помогает.',
+          style: const TextStyle(color: kTextSecondary, fontSize: 12),
+        ),
+      ),
+    ),
+  );
+}
+
 /// Сетка единого дашборда кампании.
 ///
 /// Блоки аукционной аналитики строит сама, а блоки карточки кампании получает
@@ -604,24 +641,39 @@ class _CampaignDashboardBodyState extends State<CampaignDashboardBody> {
                   ),
           ),
         ),
+      // Три блока ниже строятся из полной выгрузки всех показов — она грузится
+      // отдельно от первой страницы и заметно дольше. Пока её нет, показываем
+      // это прямо в блоке: пустая таблица неотличима от «данных нет».
       if (state.prefs.showDailyBreakdown)
         'daily': (
           id: 'daily',
           isWide: true,
-          child: DailyBreakdownSection(rows: lossReport.dailyBreakdown),
+          child: _fromAllRecords(
+            state.allRecords,
+            'Сводная по дням',
+            () => DailyBreakdownSection(rows: lossReport.dailyBreakdown),
+          ),
         ),
       if (state.prefs.showBidReport)
         'bidReport': (
           id: 'bidReport',
           isWide: true,
-          child: BidRaiseReportSection(rows: lossReport.bidRaiseRows),
+          child: _fromAllRecords(
+            state.allRecords,
+            'Поднять ставки',
+            () => BidRaiseReportSection(rows: lossReport.bidRaiseRows),
+          ),
         ),
       if (state.prefs.showOperatorReport)
         'operatorReport': (
           id: 'operatorReport',
           isWide: true,
-          child: OperatorIssueReportSection(
-            groups: lossReport.operatorIssueGroups,
+          child: _fromAllRecords(
+            state.allRecords,
+            'К оператору',
+            () => OperatorIssueReportSection(
+              groups: lossReport.operatorIssueGroups,
+            ),
           ),
         ),
     };
