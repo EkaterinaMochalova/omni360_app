@@ -83,9 +83,18 @@ class BudgetsPaceScreen extends ConsumerWidget {
           ),
         ),
         data: (campaigns) {
+          final rows = campaigns
+              .where((c) => c.isActive && (c.budget ?? 0) > 0)
+              .toList();
+          // Расписания тянем одним провайдером волнами, а не по запросу на
+          // строку: залпом часть запросов упиралась в таймаут и у этих
+          // кампаний расписание «не находилось».
+          final schedules = ref
+              .watch(campaignSchedulesProvider(rows.map((c) => c.id).join(',')))
+              .whenOrNull(data: (value) => value);
+
           final summaries =
-              campaigns
-                  .where((c) => c.isActive && (c.budget ?? 0) > 0)
+              rows
                   .map((c) {
                     // Поле spent из списка кампаний часто пустое/нулевое —
                     // как и на карточке кампании, в этом случае берём
@@ -98,21 +107,16 @@ class BudgetsPaceScreen extends ConsumerWidget {
                     final spentOverride = (c.spent != null && c.spent! > 0)
                         ? c.spent!
                         : (cardStats?.factBudget ?? 0.0);
-                    // timeSettings нет в списочном ответе — догружаем из
-                    // детального, иначе лимиты считаются от круглых суток.
-                    final schedule = ref
-                        .watch(campaignScheduleProvider(c.id))
-                        .whenOrNull(data: (value) => value);
                     return CampaignPaceSummary.fromCampaign(
                       c,
                       today,
                       spentOverride: spentOverride,
-                      schedule: schedule,
+                      schedule: schedules?[c.id],
                     );
                   })
                   .where((s) => s.totalDays > 0)
                   .toList()
-                ..sort((a, b) => a.pacePct.compareTo(b.pacePct));
+                ..sort((a, b) => a.pacePctNow.compareTo(b.pacePctNow));
 
           if (summaries.isEmpty) {
             return const Center(
@@ -199,9 +203,9 @@ class BudgetsPaceScreen extends ConsumerWidget {
                         ),
                         DataCell(
                           Text(
-                            totalPlanToDate == 0
+                            totalPlanToNow == 0
                                 ? '—'
-                                : '${(totalSpent / totalPlanToDate * 100).toStringAsFixed(1)}%',
+                                : '${(totalSpent / totalPlanToNow * 100).toStringAsFixed(1)}%',
                           ),
                         ),
                         DataCell(Text(_fmtRub.format(totalRemaining))),
@@ -256,7 +260,7 @@ class BudgetsPaceScreen extends ConsumerWidget {
                 borderRadius: BorderRadius.circular(20),
               ),
               child: Text(
-                '${(s.pacePct * 100).toStringAsFixed(1)}%',
+                '${(s.pacePctNow * 100).toStringAsFixed(1)}%',
                 style: TextStyle(color: color, fontWeight: FontWeight.w600),
               ),
             ),

@@ -145,6 +145,50 @@ final campaignScheduleProvider =
       }
     });
 
+/// Расписания сразу по нескольким кампаниям.
+///
+/// Экран со списком раньше просил их по одному провайдеру на строку, и все
+/// запросы уходили залпом: на десятке кампаний часть неизбежно упиралась в
+/// таймаут, и у этих строк расписание «не находилось». Здесь грузим волнами
+/// по три и один раз повторяем неудачную попытку — счёт идёт на единицы
+/// запросов за раз, а не на все сразу.
+/// Ключ — id через запятую, а не список: у List равенство по ссылке, и с ним
+/// каждая перерисовка создавала бы новый провайдер и новый круг запросов.
+final campaignSchedulesProvider =
+    FutureProvider.family<Map<String, BroadcastSchedule>, String>((
+      ref,
+      idsKey,
+    ) async {
+      const waveSize = 3;
+      final ids = idsKey.split(',').where((id) => id.isNotEmpty).toList();
+      final result = <String, BroadcastSchedule>{};
+
+      Future<void> load(String id) async {
+        for (var attempt = 0; attempt < 2; attempt++) {
+          final schedule = await ref.read(
+            campaignScheduleProvider(id).future,
+          );
+          if (schedule != null) {
+            result[id] = schedule;
+            return;
+          }
+          if (attempt == 0) {
+            // Провайдер кеширует и неудачу тоже, поэтому перед повтором его
+            // надо сбросить — иначе получим тот же null мгновенно.
+            ref.invalidate(campaignScheduleProvider(id));
+            await Future<void>.delayed(const Duration(milliseconds: 300));
+          }
+        }
+      }
+
+      for (var i = 0; i < ids.length; i += waveSize) {
+        final wave = ids.skip(i).take(waveSize);
+        await Future.wait(wave.map(load));
+      }
+
+      return result;
+    });
+
 // --- Campaign stats via GET /impression-stats ---
 
 final campaignStatsProvider = FutureProvider.family<CampaignStats, String>((

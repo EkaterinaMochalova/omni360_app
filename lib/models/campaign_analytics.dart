@@ -127,11 +127,7 @@ class CampaignImpressionRecord {
       side: json['side']?.toString(),
       displayOwnerName: displayOwner?['name']?.toString(),
       mediaName: media?['name']?.toString(),
-      showTime: DateTime.tryParse(
-        json['showTime']?.toString() ??
-            json['inventoryShowTime']?.toString() ??
-            '',
-      ),
+      showTime: _parseShowTime(json),
       bid: _toDouble(json['bid']),
       bidFloor: _toDouble(json['bidFloor']),
       price: _toDouble(json['price']),
@@ -144,6 +140,55 @@ class CampaignImpressionRecord {
     if (value == null) return null;
     if (value is num) return value.toDouble();
     return double.tryParse(value.toString());
+  }
+
+  /// Момент показа.
+  ///
+  /// Читали только `showTime`/`inventoryShowTime`, и если бэкенд называет поле
+  /// иначе, время оказывалось null у всех записей — а сводка по дням молча
+  /// выбрасывает записи без времени и остаётся пустой. Поэтому перебираем
+  /// известные имена, а не нашли — ищем любое поле, похожее на дату.
+  static DateTime? _parseShowTime(Map<String, dynamic> json) {
+    const knownKeys = [
+      'showTime',
+      'inventoryShowTime',
+      'showDate',
+      'impressionTime',
+      'displayTime',
+      'startTime',
+      'requestTime',
+      'bidTime',
+      'createTime',
+      'created',
+      'timestamp',
+    ];
+    for (final key in knownKeys) {
+      final parsed = _tryDate(json[key]);
+      if (parsed != null) return parsed;
+    }
+    for (final entry in json.entries) {
+      final name = entry.key.toLowerCase();
+      if (!name.contains('time') && !name.contains('date')) continue;
+      final parsed = _tryDate(entry.value);
+      if (parsed != null) return parsed;
+    }
+    return null;
+  }
+
+  static DateTime? _tryDate(dynamic value) {
+    if (value == null) return null;
+    // Секунды/миллисекунды эпохи приходят числом, DateTime.tryParse их не берёт.
+    if (value is num) {
+      final asInt = value.toInt();
+      if (asInt <= 0) return null;
+      return DateTime.fromMillisecondsSinceEpoch(
+        asInt < 100000000000 ? asInt * 1000 : asInt,
+      );
+    }
+    final text = value.toString().trim();
+    if (text.isEmpty) return null;
+    // Формат "2026-07-27 14:05:00" ISO-разбор не принимает из-за пробела.
+    return DateTime.tryParse(text.replaceFirst(' ', 'T'));
   }
 
   bool get isWin => state == 'WIN' || state == 'SUCCESS';

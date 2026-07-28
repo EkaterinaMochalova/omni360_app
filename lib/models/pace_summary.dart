@@ -76,9 +76,11 @@ class CampaignPaceSummary {
   /// Темп относительно плана на текущий момент. 1.0 = ровно по плану.
   double get pacePctNow => planToNow <= 0 ? 0 : spent / planToNow;
 
+  /// Статус считаем от плана на текущий момент, а не от плана к концу дня:
+  /// иначе утром любая кампания красная просто потому, что эфир ещё впереди.
   PaceStatus get status {
-    if (pacePct < 0.70) return PaceStatus.red;
-    if (pacePct < 0.95) return PaceStatus.yellow;
+    if (pacePctNow < 0.70) return PaceStatus.red;
+    if (pacePctNow < 0.95) return PaceStatus.yellow;
     return PaceStatus.green;
   }
 

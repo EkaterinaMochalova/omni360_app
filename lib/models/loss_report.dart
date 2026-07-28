@@ -194,9 +194,23 @@ class LossReportBuilder {
     List<CampaignImpressionRecord> records,
   ) {
     final byDay = <DateTime, List<CampaignImpressionRecord>>{};
+    var withoutTime = 0;
     for (final r in records) {
-      if (r.showTime == null) continue;
+      if (r.showTime == null) {
+        withoutTime++;
+        continue;
+      }
       byDay.putIfAbsent(_dayOf(r.showTime!), () => []).add(r);
+    }
+
+    if (records.isNotEmpty && byDay.isEmpty) {
+      // Записи есть, а времени нет ни у одной — значит поле называется не так,
+      // как мы ждём, и сводка по дням будет пустой без всяких объяснений.
+      // ignore: avoid_print
+      print(
+        '[daily] у всех $withoutTime записей нет времени показа — '
+        'проверьте имя поля в ответе',
+      );
     }
 
     final days = byDay.keys.toList()..sort();
