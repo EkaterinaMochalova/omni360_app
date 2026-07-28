@@ -89,6 +89,25 @@ class _CampaignDetailScreenState extends ConsumerState<CampaignDetailScreen> {
         .setRange(from, to);
   }
 
+  /// Весь срок кампании: от старта до «сейчас», но не дальше даты окончания.
+  /// null — дат нет, и брать период не от чего.
+  (DateTime, DateTime)? _fullPeriodOf(Campaign campaign) {
+    final start = DateTime.tryParse((campaign.startDate ?? '').trim());
+    if (start == null) return null;
+
+    final now = DateTime.now();
+    final end = DateTime.tryParse((campaign.endDate ?? '').trim());
+    var to = now;
+    if (end != null) {
+      final endOfDay = DateTime(end.year, end.month, end.day, 23, 59, 59);
+      if (endOfDay.isBefore(to)) to = endOfDay;
+    }
+
+    final from = DateTime(start.year, start.month, start.day);
+    if (!to.isAfter(from)) return null;
+    return (from, to);
+  }
+
   DateTimeRange? _initialRange(
     DateTime from,
     DateTime to,
@@ -244,6 +263,12 @@ class _CampaignDetailScreenState extends ConsumerState<CampaignDetailScreen> {
                     now,
                   );
                 },
+                onSetFullPeriod: _fullPeriodOf(campaign) == null
+                    ? null
+                    : () {
+                        final range = _fullPeriodOf(campaign)!;
+                        analyticsController.setRange(range.$1, range.$2);
+                      },
                 onRefresh: analyticsController.fetchImpressions,
               ),
               // Пока что-то грузится, это должно быть видно: без полоски и

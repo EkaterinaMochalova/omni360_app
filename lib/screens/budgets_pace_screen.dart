@@ -86,12 +86,6 @@ class BudgetsPaceScreen extends ConsumerWidget {
           final rows = campaigns
               .where((c) => c.isActive && (c.budget ?? 0) > 0)
               .toList();
-          // Расписания тянем одним провайдером волнами, а не по запросу на
-          // строку: залпом часть запросов упиралась в таймаут и у этих
-          // кампаний расписание «не находилось».
-          final schedules = ref
-              .watch(campaignSchedulesProvider(rows.map((c) => c.id).join(',')))
-              .whenOrNull(data: (value) => value);
 
           final summaries =
               rows
@@ -107,11 +101,18 @@ class BudgetsPaceScreen extends ConsumerWidget {
                     final spentOverride = (c.spent != null && c.spent! > 0)
                         ? c.spent!
                         : (cardStats?.factBudget ?? 0.0);
+                    // Расписание грузится по строке и приходит независимо от
+                    // соседей — одновременных запросов не больше трёх,
+                    // ограничитель стоит в самом провайдере.
+                    final scheduleAsync = ref.watch(
+                      campaignScheduleProvider(c.id),
+                    );
                     return CampaignPaceSummary.fromCampaign(
                       c,
                       today,
                       spentOverride: spentOverride,
-                      schedule: schedules?[c.id],
+                      schedule: scheduleAsync.valueOrNull,
+                      scheduleLoading: scheduleAsync.isLoading,
                     );
                   })
                   .where((s) => s.totalDays > 0)
@@ -284,7 +285,7 @@ class BudgetsPaceScreen extends ConsumerWidget {
               'Остаток ÷ ${s.broadcastDaysLeft} дн. (кампания идёт круглосуточно)',
               'Остаток ÷ ${s.daysLeft} календарных дн.',
             ),
-            child: _limitText(_fmtRub.format(s.dailyLimit), s.scheduleResolved),
+            child: _limitText(s, _fmtRub.format(s.dailyLimit)),
           ),
         ),
         DataCell(
@@ -299,7 +300,7 @@ class BudgetsPaceScreen extends ConsumerWidget {
               'Расписание не загрузилось — считаем круглые сутки '
                   '(${_fmtHours.format(s.broadcastHoursLeft)} ч)',
             ),
-            child: _limitText(_fmtRub.format(s.hourlyLimit), s.scheduleResolved),
+            child: _limitText(s, _fmtRub.format(s.hourlyLimit)),
           ),
         ),
       ],
@@ -362,9 +363,13 @@ class BudgetsPaceScreen extends ConsumerWidget {
   }
 
   /// Звёздочка — только когда расписание не загрузилось. Кампания без
-  /// ограничений по времени считается корректно, помечать её незачем.
-  Widget _limitText(String value, bool scheduleResolved) {
-    if (scheduleResolved) return Text(value);
-    return Text('$value*', style: const TextStyle(color: kTextSecondary));
+  /// ограничений по времени считается корректно, помечать её незачем, а пока
+  /// расписание ещё едет — это многоточие, а не признак недостоверности.
+  Widget _limitText(CampaignPaceSummary s, String value) {
+    if (s.scheduleResolved) return Text(value);
+    return Text(
+      s.scheduleLoading ? '$value…' : '$value*',
+      style: const TextStyle(color: kTextSecondary),
+    );
   }
 }

@@ -42,6 +42,10 @@ class CampaignPaceSummary {
   /// достоверный расчёт, а не отсутствие данных.
   final bool hasTimeRestrictions;
 
+  /// Расписание ещё грузится. Отличаем от неудачи: пока ждём, помечать цифру
+  /// как ненадёжную рано — она просто ещё не окончательная.
+  final bool scheduleLoading;
+
   const CampaignPaceSummary({
     required this.id,
     required this.name,
@@ -61,6 +65,7 @@ class CampaignPaceSummary {
     this.broadcastDaysLeft = 0,
     this.scheduleResolved = false,
     this.hasTimeRestrictions = false,
+    this.scheduleLoading = false,
   });
 
   double get pctSpent => budget <= 0 ? 0 : spent / budget;
@@ -104,6 +109,7 @@ class CampaignPaceSummary {
     // экран догружает его отдельно и передаёт сюда. null — загрузить не
     // удалось (это не то же самое, что расписание без ограничений).
     BroadcastSchedule? schedule,
+    bool scheduleLoading = false,
   }) {
     final start = _parseDate(campaign.startDate);
     final end = _parseDate(campaign.endDate);
@@ -172,6 +178,7 @@ class CampaignPaceSummary {
       broadcastDaysLeft: broadcastDaysLeft,
       scheduleResolved: schedule != null || hasSchedule(campaign.timeSettings),
       hasTimeRestrictions: hasSchedule(slots),
+      scheduleLoading: scheduleLoading,
       id: campaign.id,
       name: campaign.name,
       startDate: start,

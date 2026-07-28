@@ -316,13 +316,18 @@ class AnalyticsToolbar extends StatelessWidget {
   final CampaignAnalyticsState state;
   final VoidCallback onSetLast24Hours;
   final VoidCallback onSetLast7Days;
+
+  /// null — даты кампании неизвестны, и брать «весь период» не от чего.
+  final VoidCallback? onSetFullPeriod;
   final VoidCallback onRefresh;
 
   const AnalyticsToolbar({
+    super.key,
     required this.state,
     required this.onSetLast24Hours,
     required this.onSetLast7Days,
     required this.onRefresh,
+    this.onSetFullPeriod,
   });
 
   @override
@@ -339,6 +344,10 @@ class AnalyticsToolbar extends StatelessWidget {
               _RangeChip(label: '24 часа', onTap: onSetLast24Hours),
               const SizedBox(width: 8),
               _RangeChip(label: '7 дней', onTap: onSetLast7Days),
+              if (onSetFullPeriod != null) ...[
+                const SizedBox(width: 8),
+                _RangeChip(label: 'Весь период', onTap: onSetFullPeriod!),
+              ],
               const Spacer(),
               IconButton(
                 onPressed: onRefresh,

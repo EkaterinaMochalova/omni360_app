@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:dio/dio.dart';
 import '../api/omni360_client.dart';
@@ -116,6 +118,39 @@ final campaignDetailProvider = FutureProvider.family<Campaign, String>((
 
 // --- Расписание вещания ---
 
+/// Ограничитель одновременных запросов.
+///
+/// Расписание просит каждая строка таблицы сама, и без ограничителя десяток
+/// запросов уходит залпом — часть ловит таймаут, и у этих строк расписание
+/// «не находится». Собирать их в один пакетный запрос — не выход: тогда
+/// таблица ждёт последнюю кампанию, чтобы показать первую. Здесь запросы
+/// остаются независимыми (строки заполняются по мере готовности), но одновременно
+/// летят не больше [limit].
+class _RequestGate {
+  final int limit;
+  int _active = 0;
+  final _waiting = <Completer<void>>[];
+
+  _RequestGate(this.limit);
+
+  Future<T> run<T>(Future<T> Function() task) async {
+    if (_active >= limit) {
+      final waiter = Completer<void>();
+      _waiting.add(waiter);
+      await waiter.future;
+    }
+    _active++;
+    try {
+      return await task();
+    } finally {
+      _active--;
+      if (_waiting.isNotEmpty) _waiting.removeAt(0).complete();
+    }
+  }
+}
+
+final _scheduleGate = _RequestGate(3);
+
 /// `timeSettings` приходит только в детальном ответе по кампании, в списочном
 /// его нет. Поэтому экраны, работающие со списком (таблица темпов, проверка
 /// уведомлений), берут расписание отсюда. Отдельный провайдер, а не
@@ -126,23 +161,33 @@ final campaignDetailProvider = FutureProvider.family<Campaign, String>((
 /// кампанию — расписание меняется редко, перезапрашивать его незачем.
 final campaignScheduleProvider =
     FutureProvider.family<BroadcastSchedule?, String>((ref, id) async {
-      try {
-        final response = await Omni360Client().dio.get(
-          '/api/v1.0/clients/campaigns/$id',
-        );
-        final data = response.data;
-        if (data is! Map) return null;
+      // Две попытки: под нагрузкой один запрос из десятка стабильно ловит
+      // таймаут, и без повтора у этой кампании расписание пропадает совсем.
+      // Повторяем внутри ограничителя, так что нагрузку это не умножает.
+      for (var attempt = 0; attempt < 2; attempt++) {
+        try {
+          final response = await _scheduleGate.run(
+            () => Omni360Client().dio.get('/api/v1.0/clients/campaigns/$id'),
+          );
+          final data = response.data;
+          if (data is! Map) return null;
 
-        // Расписание лежит не на верхнем уровне, а внутри сегментов — ищем
-        // рекурсивно тем же сборщиком, что и модель кампании.
-        return BroadcastSchedule(TimeSlot.collectFrom(data));
-      } catch (e) {
-        // Ловим всё, а не только DioException: ошибка разбора давала такой же
-        // безмолвный null, что и успешная загрузка пустого расписания.
-        // ignore: avoid_print
-        print('[schedule $id] ошибка загрузки/разбора: $e');
-        return null;
+          // Расписание лежит не на верхнем уровне, а внутри сегментов — ищем
+          // рекурсивно тем же сборщиком, что и модель кампании.
+          return BroadcastSchedule(TimeSlot.collectFrom(data));
+        } catch (e) {
+          // Ловим всё, а не только DioException: ошибка разбора давала такой
+          // же безмолвный null, что и успешная загрузка пустого расписания.
+          if (attempt == 0) {
+            await Future<void>.delayed(const Duration(milliseconds: 400));
+            continue;
+          }
+          // ignore: avoid_print
+          print('[schedule $id] ошибка загрузки/разбора: $e');
+          return null;
+        }
       }
+      return null;
     });
 
 /// Расписания сразу по нескольким кампаниям.
@@ -152,42 +197,6 @@ final campaignScheduleProvider =
 /// таймаут, и у этих строк расписание «не находилось». Здесь грузим волнами
 /// по три и один раз повторяем неудачную попытку — счёт идёт на единицы
 /// запросов за раз, а не на все сразу.
-/// Ключ — id через запятую, а не список: у List равенство по ссылке, и с ним
-/// каждая перерисовка создавала бы новый провайдер и новый круг запросов.
-final campaignSchedulesProvider =
-    FutureProvider.family<Map<String, BroadcastSchedule>, String>((
-      ref,
-      idsKey,
-    ) async {
-      const waveSize = 3;
-      final ids = idsKey.split(',').where((id) => id.isNotEmpty).toList();
-      final result = <String, BroadcastSchedule>{};
-
-      Future<void> load(String id) async {
-        for (var attempt = 0; attempt < 2; attempt++) {
-          final schedule = await ref.read(
-            campaignScheduleProvider(id).future,
-          );
-          if (schedule != null) {
-            result[id] = schedule;
-            return;
-          }
-          if (attempt == 0) {
-            // Провайдер кеширует и неудачу тоже, поэтому перед повтором его
-            // надо сбросить — иначе получим тот же null мгновенно.
-            ref.invalidate(campaignScheduleProvider(id));
-            await Future<void>.delayed(const Duration(milliseconds: 300));
-          }
-        }
-      }
-
-      for (var i = 0; i < ids.length; i += waveSize) {
-        final wave = ids.skip(i).take(waveSize);
-        await Future.wait(wave.map(load));
-      }
-
-      return result;
-    });
 
 // --- Campaign stats via GET /impression-stats ---
 
