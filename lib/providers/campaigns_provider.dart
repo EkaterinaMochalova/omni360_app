@@ -78,63 +78,40 @@ final campaignsProvider =
 
 // --- Single campaign detail ---
 
+/// Детальный ответ по кампании — единственное место, где он запрашивается.
+///
+/// Раньше тот же URL независимо тянули ещё расписание и подсчёт фотоотчётов,
+/// то есть на каждую карточку списка уходило по три одинаковых запроса. Под
+/// нагрузкой часть из них ловила таймаут — отсюда и звёздочки в таблице
+/// темпов. Riverpod кеширует результат по id, так что теперь запрос один.
 final campaignDetailProvider = FutureProvider.family<Campaign, String>((
   ref,
   id,
 ) async {
-  final response = await Omni360Client().dio.get(
-    '/api/v1.0/clients/campaigns/$id',
+  final response = await _detailGate.run(
+    () => Omni360Client().dio.get('/api/v1.0/clients/campaigns/$id'),
   );
   final data = response.data as Map<String, dynamic>;
-  // ignore: avoid_print
-  print(
-    '[DEBUG detail] budgetBuyer=${data['budgetBuyer']} totalBudget=${data['totalBudget']}',
-  );
-  // ignore: avoid_print
-  print(
-    '[DEBUG detail] maxImpressionsCount=${data['maxImpressionsCount']} maxDailyImpressionsCount=${data['maxDailyImpressionsCount']}',
-  );
   final campaign = Campaign.fromJson(data);
   if ((campaign.budget ?? 0) <= 0) {
     // Без бюджета не считается рекомендуемый лимит — печатаем, где его искать.
     // ignore: avoid_print
     print(
-      '[DEBUG budget] не найден: totalBudget=${data['totalBudget']} '
+      '[DEBUG budget $id] не найден: totalBudget=${data['totalBudget']} '
       'budget=${data['budget']} budgetBuyer=${data['budgetBuyer']} '
       'budgetConfig=${data['budgetConfig']}',
     );
   }
-  // ignore: avoid_print
-  print(
-    '[DEBUG detail] strategy=${data['strategy']} '
-    'сегментов=${(data['segments'] as List?)?.length} '
-    'слотов расписания=${campaign.timeSettings?.length}',
-  );
-  // Плановый OTS кампании берётся первым делом из maxImpressionsCount —
-  // печатаем всех кандидатов рядом с результатом, чтобы проверить, что это
-  // действительно контакты, а не лимит выходов, и что единицы совпадают
-  // с суммой по сегментам (та домножается на 1000).
-  // ignore: avoid_print
-  print(
-    '[DEBUG ots plan] parsed=${campaign.ots} exits=${campaign.exits} | '
-    'maxImpressionsCount=${data['maxImpressionsCount']} '
-    'ots=${data['ots']} totalOts=${data['totalOts']} '
-    'maxDailyImpressionsCount=${data['maxDailyImpressionsCount']} '
-    'plays=${data['plays']} exits=${data['exits']}',
-  );
   return campaign;
 });
 
-// --- Расписание вещания ---
-
 /// Ограничитель одновременных запросов.
 ///
-/// Расписание просит каждая строка таблицы сама, и без ограничителя десяток
-/// запросов уходит залпом — часть ловит таймаут, и у этих строк расписание
-/// «не находится». Собирать их в один пакетный запрос — не выход: тогда
-/// таблица ждёт последнюю кампанию, чтобы показать первую. Здесь запросы
-/// остаются независимыми (строки заполняются по мере готовности), но одновременно
-/// летят не больше [limit].
+/// Детальный ответ просит каждая карточка сама, и без ограничителя десяток
+/// запросов уходит залпом — часть ловит таймаут. Собирать их в один пакетный
+/// запрос — не выход: тогда экран ждёт последнюю кампанию, чтобы показать
+/// первую. Здесь запросы остаются независимыми (карточки заполняются по мере
+/// готовности), но одновременно летят не больше [limit].
 class _RequestGate {
   final int limit;
   int _active = 0;
@@ -158,54 +135,26 @@ class _RequestGate {
   }
 }
 
-final _scheduleGate = _RequestGate(3);
+final _detailGate = _RequestGate(3);
 
-/// `timeSettings` приходит только в детальном ответе по кампании, в списочном
-/// его нет. Поэтому экраны, работающие со списком (таблица темпов, проверка
-/// уведомлений), берут расписание отсюда. Отдельный провайдер, а не
-/// campaignDetailProvider: тот печатает в консоль весь массив сегментов, что
-/// на десятке кампаний превращается в мусор, и тянет модель целиком.
+/// `timeSettings` есть только в детальном ответе, в списочном его нет — но
+/// свой запрос здесь больше не делаем: берём уже загруженный и закешированный
+/// детальный ответ. Раньше этот провайдер тянул тот же URL отдельно, и вместе
+/// с подсчётом фотоотчётов выходило по три одинаковых запроса на кампанию.
 ///
-/// Riverpod кеширует результат по id, так что на экран это один запрос на
-/// кампанию — расписание меняется редко, перезапрашивать его незачем.
+/// null возвращаем только если детальный ответ не загрузился: пустое
+/// расписание — это «ограничений по времени нет», а не «данных нет».
 final campaignScheduleProvider =
     FutureProvider.family<BroadcastSchedule?, String>((ref, id) async {
-      // Две попытки: под нагрузкой один запрос из десятка стабильно ловит
-      // таймаут, и без повтора у этой кампании расписание пропадает совсем.
-      // Повторяем внутри ограничителя, так что нагрузку это не умножает.
-      for (var attempt = 0; attempt < 2; attempt++) {
-        try {
-          final response = await _scheduleGate.run(
-            () => Omni360Client().dio.get('/api/v1.0/clients/campaigns/$id'),
-          );
-          final data = response.data;
-          if (data is! Map) return null;
-
-          // Расписание лежит не на верхнем уровне, а внутри сегментов — ищем
-          // рекурсивно тем же сборщиком, что и модель кампании.
-          return BroadcastSchedule(TimeSlot.collectFrom(data));
-        } catch (e) {
-          // Ловим всё, а не только DioException: ошибка разбора давала такой
-          // же безмолвный null, что и успешная загрузка пустого расписания.
-          if (attempt == 0) {
-            await Future<void>.delayed(const Duration(milliseconds: 400));
-            continue;
-          }
-          // ignore: avoid_print
-          print('[schedule $id] ошибка загрузки/разбора: $e');
-          return null;
-        }
+      try {
+        final campaign = await ref.watch(campaignDetailProvider(id).future);
+        return BroadcastSchedule(campaign.timeSettings ?? const []);
+      } catch (e) {
+        // ignore: avoid_print
+        print('[schedule $id] детальный ответ не загрузился: $e');
+        return null;
       }
-      return null;
     });
-
-/// Расписания сразу по нескольким кампаниям.
-///
-/// Экран со списком раньше просил их по одному провайдеру на строку, и все
-/// запросы уходили залпом: на десятке кампаний часть неизбежно упиралась в
-/// таймаут, и у этих строк расписание «не находилось». Здесь грузим волнами
-/// по три и один раз повторяем неудачную попытку — счёт идёт на единицы
-/// запросов за раз, а не на все сразу.
 
 // --- Campaign stats via GET /impression-stats ---
 
@@ -221,19 +170,6 @@ final campaignStatsProvider = FutureProvider.family<CampaignStats, String>((
     final data = response.data;
     if (data is Map<String, dynamic>) {
       final stats = CampaignStats.fromImpressionStats(data);
-      // Диагностика OTS: сверяем, из какого поля пришли план и факт и не
-      // расходятся ли они на порядок (признак разных единиц — контакты против
-      // тысяч контактов, либо выходы, подставленные вместо контактов).
-      // ignore: avoid_print
-      print(
-        '[ots $id] plan=${stats.planOts} fact=${stats.factOts} '
-        'estimated=${stats.factOtsIsEstimated} | '
-        'otsCount=${data['otsCount']} reservedOts=${(data['reservedBudgetStat'] as Map?)?['ots']} '
-        'otsCountShowed=${data['otsCountShowed']} totalDmpOts=${data['totalDmpOts']} '
-        'totalEstimatedOts=${data['totalEstimatedOts']} '
-        'hourlyOts=${data['hourlyOts']} hourlyOtsShowed=${data['hourlyOtsShowed']} '
-        'totalCountShowed=${data['totalCountShowed']}',
-      );
       if (stats.factBudget <= 0) {
         // Диагностика: факт по бюджету не нашёлся ни в одном из ожидаемых
         // полей — печатаем, что реально пришло, чтобы не гадать.
@@ -274,11 +210,9 @@ final campaignPhotoCoverageProvider =
     FutureProvider.family<CampaignPhotoCoverage, String>((ref, id) async {
       final client = Omni360Client().dio;
 
-      final detailResp = await client.get('/api/v1.0/clients/campaigns/$id');
-      final detail = detailResp.data;
-      if (detail is! Map<String, dynamic>) {
-        return const CampaignPhotoCoverage(totalSides: 0, sidesWithPhoto: 0);
-      }
+      // Даты берём из уже загруженного детального ответа, а не запрашиваем его
+      // повторно: тот же URL до этого тянули и здесь, и в расписании.
+      final detail = await ref.watch(campaignDetailProvider(id).future);
 
       String? toApiDateTime(String? date, {required bool endOfDay}) {
         if (date == null || date.isEmpty) return null;
@@ -287,14 +221,8 @@ final campaignPhotoCoverageProvider =
         return '${trimmed}T${endOfDay ? '23:59:59' : '00:00:00'}';
       }
 
-      final startDate = toApiDateTime(
-        detail['startDate']?.toString(),
-        endOfDay: false,
-      );
-      final endDate = toApiDateTime(
-        detail['endDate']?.toString(),
-        endOfDay: true,
-      );
+      final startDate = toApiDateTime(detail.startDate, endOfDay: false);
+      final endDate = toApiDateTime(detail.endDate, endOfDay: true);
 
       final rows = <Map<String, dynamic>>[];
       const size = 500;

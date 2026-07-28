@@ -156,9 +156,11 @@ class Campaign {
       // и он подставлялся первым — из-за него план по OTS показывался даже у
       // кампаний, где лимит по OTS не задан вовсе, причём числом другого
       // порядка. Нет настоящего OTS — пусть будет null и прочерк в интерфейсе.
-      ots:
-          _toDouble(json['ots'] ?? json['totalOts']) ??
-          _otsFromSegments(json['segments']),
+      // Только явно заданный лимит по OTS. Сумма по инвентарям сегментов
+      // (была запасным вариантом, ещё и домноженная на 1000) — это расчётная
+      // ёмкость инвентаря, а не план кампании: она и давала «странный план»
+      // там, где лимит по OTS не выставлен вообще.
+      ots: _toDouble(json['ots'] ?? json['totalOts']),
       exits: _toDouble(json['exits'] ?? json['totalExits'] ?? json['plays']),
       startDate: _trimDate(json['startDate']?.toString()),
       endDate: _trimDate(json['endDate']?.toString()),
@@ -196,21 +198,6 @@ class Campaign {
       }
     }
     return null;
-  }
-
-  /// Сумма OTS по всем инвентарям во всех сегментах (единиц × 1000 контактов)
-  static double? _otsFromSegments(dynamic segments) {
-    if (segments is! List || segments.isEmpty) return null;
-    double total = 0;
-    for (final seg in segments) {
-      final inventories = (seg as Map?)?['inventories'];
-      if (inventories is! List) continue;
-      for (final inv in inventories) {
-        final ots = _toDouble((inv as Map?)?['ots']);
-        if (ots != null) total += ots;
-      }
-    }
-    return total > 0 ? total * 1000 : null; // ots в тысячах контактов
   }
 
   static (List<int>, List<String>) _extractDisplayOwners(

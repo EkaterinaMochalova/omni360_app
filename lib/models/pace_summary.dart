@@ -132,6 +132,10 @@ class CampaignPaceSummary {
     // удалось (это не то же самое, что расписание без ограничений).
     BroadcastSchedule? schedule,
     bool scheduleLoading = false,
+    // Установленные лимиты: в списочном/детальном ответе dailyBudget часто
+    // пустой, тогда берём план из статистики — иначе колонка «Установлен»
+    // пустовала при заполненном часовом лимите.
+    double? currentDailyLimit,
     double? currentHourlyLimit,
   }) {
     final start = _parseDate(campaign.startDate);
@@ -205,7 +209,9 @@ class CampaignPaceSummary {
       scheduleResolved: schedule != null || hasSchedule(campaign.timeSettings),
       hasTimeRestrictions: hasSchedule(slots),
       scheduleLoading: scheduleLoading,
-      currentDailyLimit: campaign.dailyBudget,
+      currentDailyLimit: (campaign.dailyBudget ?? 0) > 0
+          ? campaign.dailyBudget
+          : currentDailyLimit,
       currentHourlyLimit: currentHourlyLimit,
       id: campaign.id,
       name: campaign.name,

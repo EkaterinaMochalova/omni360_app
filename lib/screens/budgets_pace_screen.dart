@@ -112,6 +112,7 @@ class BudgetsPaceScreen extends ConsumerWidget {
                       spentOverride: spentOverride,
                       schedule: scheduleAsync.valueOrNull,
                       scheduleLoading: scheduleAsync.isLoading,
+                      currentDailyLimit: cardStats?.planDailyBudget,
                       currentHourlyLimit: cardStats?.hourlyBudgetPlan,
                     );
                   })
@@ -156,7 +157,6 @@ class BudgetsPaceScreen extends ConsumerWidget {
                     DataColumn(label: Text('Бюджет'), numeric: true),
                     DataColumn(label: Text('Факт'), numeric: true),
                     DataColumn(label: Text('% освоено'), numeric: true),
-                    DataColumn(label: Text('Сейчас: факт / план'), numeric: true),
                     DataColumn(label: Text('Не хватает'), numeric: true),
                     DataColumn(label: Text('Темп'), numeric: true),
                     DataColumn(label: Text('Остаток'), numeric: true),
@@ -186,12 +186,6 @@ class BudgetsPaceScreen extends ConsumerWidget {
                             totalBudget == 0
                                 ? '—'
                                 : '${(totalSpent / totalBudget * 100).toStringAsFixed(1)}%',
-                          ),
-                        ),
-                        DataCell(
-                          Text(
-                            '${_fmtRub.format(totalSpent)} / '
-                            '${_fmtRub.format(totalPlanToNow)}',
                           ),
                         ),
                         DataCell(
@@ -246,16 +240,6 @@ class BudgetsPaceScreen extends ConsumerWidget {
         DataCell(Text(_fmtRub.format(s.budget))),
         DataCell(Text(_fmtRub.format(s.spent))),
         DataCell(Text('${(s.pctSpent * 100).toStringAsFixed(1)}%')),
-        DataCell(
-          Tooltip(
-            message:
-                'План на текущий момент — по доле уже прошедшего эфирного '
-                'времени, а не по целым дням',
-            child: Text(
-              '${_fmtRub.format(s.spent)} / ${_fmtRub.format(s.planToNow)}',
-            ),
-          ),
-        ),
         DataCell(_shortfallText(s)),
         DataCell(
           Tooltip(

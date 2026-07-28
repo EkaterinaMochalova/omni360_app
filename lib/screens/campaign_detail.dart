@@ -1100,6 +1100,7 @@ class _LimitsCard extends StatelessWidget {
       DateTime.now(),
       spentOverride: spent,
       budgetOverride: stats?.planBudget,
+      currentDailyLimit: stats?.planDailyBudget,
       currentHourlyLimit: stats?.hourlyBudgetPlan,
     );
 
@@ -1156,8 +1157,9 @@ class _LimitsCard extends StatelessWidget {
                 ),
                 if (hasFact && recommended > 0)
                   _value(
-                    'Выбрано лимита',
-                    '${(fact / recommended * 100).toStringAsFixed(0)}%',
+                    'Выполнение',
+                    '${(fact / recommended * 100).toStringAsFixed(0)}% '
+                        'от рекомендуемого',
                     fact > recommended ? Colors.red : const Color(0xFF2E7D32),
                   ),
               ],
@@ -1282,15 +1284,28 @@ class _DetailedStatTile extends StatelessWidget {
         ? const Color(0xFF1565C0)
         : const Color(0xFF2E7D32);
 
-    return Column(
+    // Каждая метрика — отдельная плашка с фоном и рамкой: без них десяток
+    // метрик сливался в одну простыню, и глазом их было не разделить.
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: kBg,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: kBorder),
+      ),
+      child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
         Text(
           row.label,
-          style: const TextStyle(color: kTextSecondary, fontSize: 11),
+          style: const TextStyle(
+            color: kTextSecondary,
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+          ),
         ),
-        const SizedBox(height: 2),
+        const SizedBox(height: 4),
         Text(
           'План: ${row.plan}',
           style: const TextStyle(color: kTextSecondary, fontSize: 13),
@@ -1315,6 +1330,7 @@ class _DetailedStatTile extends StatelessWidget {
           ),
         ],
       ],
+      ),
     );
   }
 }

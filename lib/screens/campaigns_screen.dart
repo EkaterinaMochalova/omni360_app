@@ -11,6 +11,7 @@ import '../services/local_order_store.dart';
 import '../utils/campaign_notifications.dart';
 import '../utils/pace_alerts.dart';
 import '../widgets/app_sidebar.dart';
+import '../widgets/loading_placeholders.dart';
 import '../widgets/campaign_summary_panel.dart';
 import '../widgets/reorderable_flex_wrap.dart';
 // Переходы в сервисный дашборд и бюджеты/темпы живут в AppSidebar.
@@ -955,6 +956,13 @@ class _CampaignCard extends ConsumerWidget {
               hasOver: hasOver,
               hasNoExits: hasNoExits,
               hasUnder: hasUnder,
+              // Расшифровка для подсказки: по какой метрике и насколько
+              // отклонились — иначе плашка ничего не объясняет.
+              overHint: _alertHint(alerts, PaceType.over),
+              underHint: _alertHint(alerts, PaceType.under),
+              noExitsHint:
+                  'Кампания в активном окне вещания и показы за период есть, '
+                  'но за последний час ни одного выхода.',
             );
           }()
         : null;
@@ -1034,18 +1042,21 @@ class _CampaignCard extends ConsumerWidget {
                       '⚡ Перерасход',
                       const Color(0xFFC62828),
                       const Color(0xFFFFEBEE),
+                      hint: alertDots.overHint,
                     ),
                   if (alertDots.hasNoExits)
                     _AlertDot(
                       '⚠ Нет выходов/час',
                       const Color(0xFFE65100),
                       const Color(0xFFFFF3E0),
+                      hint: alertDots.noExitsHint,
                     ),
                   if (alertDots.hasUnder)
                     _AlertDot(
                       '📉 Недотрата',
                       const Color(0xFF1565C0),
                       const Color(0xFFE3F2FD),
+                      hint: alertDots.underHint,
                     ),
                 ],
               ),
@@ -1143,18 +1154,27 @@ class _CampaignCard extends ConsumerWidget {
               children: [
                 Expanded(
                   child: _Metric(
-                    'OTS',
-                    c.ots != null
-                        ? NumberFormat.compact(locale: 'ru').format(c.ots)
+                    // Здесь стоял план из кампании, а он у большинства РК не
+                    // задан — отсюда сплошные прочерки. Показываем факт из
+                    // статистики: он есть и говорит больше.
+                    'OTS факт',
+                    (cardStats != null && cardStats.factOts > 0)
+                        ? NumberFormat.compact(
+                            locale: 'ru',
+                          ).format(cardStats.factOts)
                         : '—',
+                    loading: shouldLoadDetails && cardStats == null,
                   ),
                 ),
                 Expanded(
                   child: _Metric(
-                    'Выходы',
-                    c.exits != null
-                        ? NumberFormat.compact(locale: 'ru').format(c.exits)
+                    'Выходы факт',
+                    (cardStats != null && cardStats.factExits > 0)
+                        ? NumberFormat.compact(
+                            locale: 'ru',
+                          ).format(cardStats.factExits)
                         : '—',
+                    loading: shouldLoadDetails && cardStats == null,
                   ),
                 ),
                 Expanded(
@@ -1189,30 +1209,71 @@ class _CampaignCard extends ConsumerWidget {
   }
 }
 
+/// Текст подсказки для плашки: по каким метрикам и насколько отклонились.
+///
+/// Темп считается от доли уже прошедшего эфирного времени за сегодня, поэтому
+/// это и надо объяснить — иначе непонятно, с чем вообще сравнивали.
+String _alertHint(List<PaceAlert> alerts, PaceType type) {
+  final matching = alerts.where((a) => a.type == type).toList();
+  if (matching.isEmpty) return '';
+
+  final direction = type == PaceType.over ? 'выше' : 'ниже';
+  final lines = matching
+      .map((a) => '• ${a.metric}: на ${a.pct.toStringAsFixed(0)}% $direction')
+      .join('\n');
+
+  return 'Факт отклонился от ожидаемого темпа на текущий момент:\n$lines\n\n'
+      'Ожидаемый темп — доля эфирного времени, прошедшая с начала сегодняшнего '
+      'вещания по расписанию.';
+}
+
 class _AlertDot extends StatelessWidget {
   final String label;
   final Color color;
   final Color bg;
-  const _AlertDot(this.label, this.color, this.bg);
+
+  /// Объяснение, почему плашка загорелась: сама надпись ничего не говорит о
+  /// том, по какой метрике и насколько отклонились.
+  final String? hint;
+
+  const _AlertDot(this.label, this.color, this.bg, {this.hint});
 
   @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-    decoration: BoxDecoration(
-      color: bg,
-      borderRadius: BorderRadius.circular(10),
-    ),
-    child: Text(
-      label,
-      style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w500),
-    ),
-  );
+  Widget build(BuildContext context) {
+    final chip = Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: color,
+          fontSize: 10,
+          fontWeight: FontWeight.w500,
+        ),
+      ),
+    );
+
+    if (hint == null) return chip;
+    return Tooltip(
+      message: hint!,
+      waitDuration: const Duration(milliseconds: 200),
+      child: chip,
+    );
+  }
 }
 
 class _Metric extends StatelessWidget {
   final String label;
   final String value;
-  const _Metric(this.label, this.value);
+
+  /// Пока значение едет, вместо прочерка показываем переливающийся блок:
+  /// прочерк неотличим от «данных нет».
+  final bool loading;
+
+  const _Metric(this.label, this.value, {this.loading = false});
 
   @override
   Widget build(BuildContext context) => Column(
@@ -1220,14 +1281,17 @@ class _Metric extends StatelessWidget {
     children: [
       Text(label, style: const TextStyle(color: kTextSecondary, fontSize: 11)),
       const SizedBox(height: 2),
-      Text(
-        value,
-        style: const TextStyle(
-          color: kTextPrimary,
-          fontWeight: FontWeight.w600,
-          fontSize: 14,
+      if (loading)
+        const ShimmerBox(width: 44, height: 14)
+      else
+        Text(
+          value,
+          style: const TextStyle(
+            color: kTextPrimary,
+            fontWeight: FontWeight.w600,
+            fontSize: 14,
+          ),
         ),
-      ),
     ],
   );
 }
