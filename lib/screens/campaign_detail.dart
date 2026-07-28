@@ -3,27 +3,23 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../main.dart';
 import '../providers/campaigns_provider.dart';
+import '../providers/campaign_analytics_provider.dart';
 import '../models/campaign.dart';
-import '../services/local_order_store.dart';
-import '../widgets/reorderable_flex_wrap.dart';
+import '../models/campaign_analytics.dart';
+import '../models/loss_report.dart';
 import 'campaign_analytics_screen.dart';
 import '../widgets/stats_chart.dart';
 import '../utils/pace_alerts.dart';
 import '../utils/broadcast_schedule.dart';
 
-const _kDetailOrderKey = 'omni360-detail-order';
-const _kDetailWidthsKey = 'omni360-detail-widths';
 const _kDetailBlockIds = [
   'status',
   'dates',
   'photo',
   'planFact',
   'detailed',
-  'auction',
   'chart',
 ];
-
-typedef _DetailBlock = ({String id, bool isWide, Widget child});
 
 class CampaignDetailScreen extends ConsumerStatefulWidget {
   final String campaignId;
@@ -36,44 +32,74 @@ class CampaignDetailScreen extends ConsumerStatefulWidget {
 }
 
 class _CampaignDetailScreenState extends ConsumerState<CampaignDetailScreen> {
-  List<String> _order = _kDetailBlockIds;
-  Map<String, double> _widths = {};
+  /// Календарь: выбирать можно только даты, когда кампания крутится, — от её
+  /// старта до сегодня. Дальше конца кампании и в будущее ходить незачем.
+  Future<void> _pickRange(Campaign campaign) async {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
 
-  @override
-  void initState() {
-    super.initState();
-    _loadOrder();
-    _loadWidths();
-  }
+    final start = DateTime.tryParse((campaign.startDate ?? '').trim());
+    final end = DateTime.tryParse((campaign.endDate ?? '').trim());
+    if (start == null) return;
 
-  Future<void> _loadOrder() async {
-    final saved = await LocalOrderStore.instance.loadOrder(_kDetailOrderKey);
-    if (saved != null && mounted) {
-      setState(
-        () => _order = LocalOrderStore.instance.mergeOrder(
-          _kDetailBlockIds,
-          saved,
-        ),
-      );
+    final firstDate = DateTime(start.year, start.month, start.day);
+    // Верхняя граница — раньше из «сегодня» и даты окончания, но не раньше
+    // старта, иначе showDateRangePicker падает на lastDate < firstDate.
+    var lastDate = today;
+    if (end != null) {
+      final endDay = DateTime(end.year, end.month, end.day);
+      if (endDay.isBefore(lastDate)) lastDate = endDay;
     }
+    if (lastDate.isBefore(firstDate)) lastDate = firstDate;
+
+    final state = ref.read(campaignAnalyticsProvider(widget.campaignId));
+    final currentFrom = state.query.start;
+    final currentTo = state.query.end;
+
+    final picked = await showDateRangePicker(
+      context: context,
+      firstDate: firstDate,
+      lastDate: lastDate,
+      currentDate: today,
+      initialDateRange: _initialRange(currentFrom, currentTo, firstDate, lastDate),
+      helpText: 'Период показов',
+      saveText: 'Применить',
+      // Без flutter_localizations русской локали в календаре нет — просить её
+      // здесь значит уронить пикер, поэтому оставляем локаль приложения.
+    );
+    if (picked == null || !mounted) return;
+
+    // Берём день целиком: аналитика оперирует моментами времени, а календарь
+    // отдаёт полночь — иначе последний выбранный день выпал бы из выборки.
+    final from = DateTime(
+      picked.start.year,
+      picked.start.month,
+      picked.start.day,
+    );
+    final to = DateTime(
+      picked.end.year,
+      picked.end.month,
+      picked.end.day,
+      23,
+      59,
+      59,
+    );
+    ref
+        .read(campaignAnalyticsProvider(widget.campaignId).notifier)
+        .setRange(from, to);
   }
 
-  Future<void> _loadWidths() async {
-    final saved = await LocalOrderStore.instance.loadWidths(_kDetailWidthsKey);
-    if (saved != null && mounted) {
-      setState(() => _widths = saved);
-    }
-  }
-
-  void _onReorder(List<_DetailBlock> newOrder) {
-    final ids = newOrder.map((b) => b.id).toList();
-    setState(() => _order = ids);
-    LocalOrderStore.instance.saveOrder(_kDetailOrderKey, ids);
-  }
-
-  void _onResize(String id, double fraction) {
-    setState(() => _widths = {..._widths, id: fraction});
-    LocalOrderStore.instance.saveWidths(_kDetailWidthsKey, _widths);
+  DateTimeRange? _initialRange(
+    DateTime from,
+    DateTime to,
+    DateTime firstDate,
+    DateTime lastDate,
+  ) {
+    // Сохранённый период может выходить за границы кампании — тогда календарь
+    // бросается на некорректном initialDateRange, лучше не подставлять его.
+    if (from.isBefore(firstDate) || to.isAfter(lastDate)) return null;
+    if (to.isBefore(from)) return null;
+    return DateTimeRange(start: from, end: to);
   }
 
   @override
@@ -82,6 +108,11 @@ class _CampaignDetailScreenState extends ConsumerState<CampaignDetailScreen> {
     final detail = ref.watch(campaignDetailProvider(campaignId));
     final stats = ref.watch(campaignStatsProvider(campaignId));
     final photoCoverage = ref.watch(campaignPhotoCoverageProvider(campaignId));
+    final analytics = ref.watch(campaignAnalyticsProvider(campaignId));
+    final analyticsController = ref.read(
+      campaignAnalyticsProvider(campaignId).notifier,
+    );
+    final campaignName = detail.asData?.value.name ?? 'Кампания';
 
     return Scaffold(
       backgroundColor: kBg,
@@ -110,6 +141,33 @@ class _CampaignDetailScreenState extends ConsumerState<CampaignDetailScreen> {
           orElse: () =>
               const Text('Кампания', style: TextStyle(color: kTextPrimary)),
         ),
+        actions: [
+          IconButton(
+            tooltip: 'Период показов',
+            onPressed: detail.asData == null
+                ? null
+                : () => _pickRange(detail.asData!.value),
+            icon: const Icon(Icons.date_range_rounded),
+          ),
+          IconButton(
+            tooltip: 'Экспорт в Excel',
+            onPressed: () =>
+                exportAnalyticsToExcel(context, analytics, campaignName),
+            icon: const Icon(Icons.ios_share_rounded),
+          ),
+          IconButton(
+            tooltip: 'Настроить дашборд',
+            onPressed: () =>
+                openDashboardSettings(context, analytics, analyticsController),
+            icon: const Icon(Icons.dashboard_customize_outlined),
+          ),
+          IconButton(
+            tooltip: 'Фильтры',
+            onPressed: () =>
+                openAnalyticsFilters(context, analytics, analyticsController),
+            icon: const Icon(Icons.tune_rounded),
+          ),
+        ],
       ),
       body: detail.when(
         loading: () =>
@@ -121,7 +179,7 @@ class _CampaignDetailScreenState extends ConsumerState<CampaignDetailScreen> {
           ),
         ),
         data: (campaign) {
-          final blocksById = <String, _DetailBlock>{
+          final blocksById = <String, DashboardBlock>{
             'status': (
               id: 'status',
               isWide: false,
@@ -154,11 +212,6 @@ class _CampaignDetailScreenState extends ConsumerState<CampaignDetailScreen> {
                     _DetailedStatsCard(campaign: campaign, stats: null),
               ),
             ),
-            'auction': (
-              id: 'auction',
-              isWide: false,
-              child: _AuctionAnalyticsCard(campaign: campaign),
-            ),
             if (stats.maybeWhen(
               data: (s) => s.daily.isNotEmpty,
               orElse: () => false,
@@ -173,22 +226,55 @@ class _CampaignDetailScreenState extends ConsumerState<CampaignDetailScreen> {
               ),
           };
 
-          final blocks = [
-            for (final id in _order)
-              if (blocksById.containsKey(id)) blocksById[id]!,
-          ];
-
-          return SingleChildScrollView(
-            padding: const EdgeInsets.all(16),
-            child: ReorderableFlexWrap<_DetailBlock>(
-              items: blocks,
-              idOf: (b) => b.id,
-              onReorder: _onReorder,
-              itemBuilder: (context, b) => b.child,
-              widthFractionOf: (b) =>
-                  _widths[b.id] ?? (b.isWide ? 1.0 : 0.48),
-              onResize: _onResize,
-            ),
+          return Column(
+            children: [
+              AnalyticsToolbar(
+                state: analytics,
+                onSetLast24Hours: () {
+                  final now = DateTime.now();
+                  analyticsController.setRange(
+                    now.subtract(const Duration(hours: 24)),
+                    now,
+                  );
+                },
+                onSetLast7Days: () {
+                  final now = DateTime.now();
+                  analyticsController.setRange(
+                    now.subtract(const Duration(days: 7)),
+                    now,
+                  );
+                },
+                onRefresh: analyticsController.fetchImpressions,
+              ),
+              if (analytics.impressions.hasError)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                  child: Text(
+                    analyticsErrorMessage(analytics.impressions.error!),
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: kTextSecondary, fontSize: 12),
+                  ),
+                ),
+              Expanded(
+                // Блоки кампании и блоки аналитики — одна сетка с общим
+                // порядком и ширинами. Аналитика может ещё грузиться или
+                // отвалиться по таймауту: карточка кампании от этого не
+                // должна пропадать, поэтому page передаём как есть.
+                child: CampaignDashboardBody(
+                  state: analytics,
+                  page: analytics.impressions.asData?.value,
+                  aggregate:
+                      analytics.aggregate.asData?.value ??
+                      CampaignAnalyticsAggregate.empty(),
+                  lossReport: LossReportBuilder.build(
+                    analytics.allRecords.asData?.value ?? const [],
+                  ),
+                  onPageChange: analyticsController.setPage,
+                  extraBlocks: blocksById,
+                  extraBlockIds: _kDetailBlockIds,
+                ),
+              ),
+            ],
           );
         },
       ),
@@ -806,52 +892,6 @@ class _DetailedStatsCard extends StatelessWidget {
   static double? _ratio(double? plan, double? fact) {
     if (plan == null || fact == null || plan <= 0 || fact <= 0) return null;
     return fact / plan;
-  }
-}
-
-class _AuctionAnalyticsCard extends StatelessWidget {
-  final Campaign campaign;
-
-  const _AuctionAnalyticsCard({required this.campaign});
-
-  @override
-  Widget build(BuildContext context) {
-    return _Card(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'Аукцион и запросы',
-            style: TextStyle(
-              color: kTextPrimary,
-              fontSize: 15,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 6),
-          const Text(
-            'Подробно по каждому запросу, победам, проигрышам и настраиваемому дашборду',
-            style: TextStyle(color: kTextSecondary, fontSize: 12),
-          ),
-          const SizedBox(height: 12),
-          FilledButton.icon(
-            onPressed: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => CampaignAnalyticsScreen(
-                    campaignId: campaign.id,
-                    campaignName: campaign.name,
-                  ),
-                ),
-              );
-            },
-            style: FilledButton.styleFrom(backgroundColor: kAccent),
-            icon: const Icon(Icons.query_stats_rounded),
-            label: const Text('Открыть аналитику запросов'),
-          ),
-        ],
-      ),
-    );
   }
 }
 

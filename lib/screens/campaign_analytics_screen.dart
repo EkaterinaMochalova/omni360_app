@@ -17,113 +17,13 @@ import '../widgets/card_section.dart';
 import '../widgets/loss_report_sections.dart';
 import '../widgets/reorderable_flex_wrap.dart';
 
-class CampaignAnalyticsScreen extends ConsumerWidget {
-  final String campaignId;
-  final String campaignName;
+// Экран аукционной аналитики схлопнут с карточкой кампании в единый
+// дашборд. Отсюда он берёт действия шапки, панель периода и сетку блоков.
 
-  const CampaignAnalyticsScreen({
-    super.key,
-    required this.campaignId,
-    required this.campaignName,
-  });
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final state = ref.watch(campaignAnalyticsProvider(campaignId));
-    final controller = ref.read(campaignAnalyticsProvider(campaignId).notifier);
-
-    return Scaffold(
-      backgroundColor: kBg,
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0,
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Аукционная аналитика',
-              style: TextStyle(
-                color: kTextPrimary,
-                fontWeight: FontWeight.bold,
-                fontSize: 16,
-              ),
-            ),
-            Text(
-              campaignName,
-              style: const TextStyle(color: kTextSecondary, fontSize: 12),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ],
-        ),
-        actions: [
-          IconButton(
-            tooltip: 'Экспорт в Excel',
-            onPressed: () => _exportToExcel(context, state),
-            icon: const Icon(Icons.ios_share_rounded),
-          ),
-          IconButton(
-            tooltip: 'Настроить дашборд',
-            onPressed: () => _openDashboardSettings(context, state, controller),
-            icon: const Icon(Icons.dashboard_customize_outlined),
-          ),
-          IconButton(
-            tooltip: 'Фильтры',
-            onPressed: () => _openFilters(context, state, controller),
-            icon: const Icon(Icons.tune_rounded),
-          ),
-        ],
-      ),
-      body: Column(
-        children: [
-          _Toolbar(
-            state: state,
-            onSetLast24Hours: () {
-              final now = DateTime.now();
-              controller.setRange(now.subtract(const Duration(hours: 24)), now);
-            },
-            onSetLast7Days: () {
-              final now = DateTime.now();
-              controller.setRange(now.subtract(const Duration(days: 7)), now);
-            },
-            onRefresh: controller.fetchImpressions,
-          ),
-          Expanded(
-            child: state.impressions.when(
-              loading: () => const Center(
-                child: CircularProgressIndicator(color: kAccent),
-              ),
-              error: (e, _) => Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Text(
-                    _buildErrorMessage(e),
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(color: kTextSecondary),
-                  ),
-                ),
-              ),
-              data: (page) => _AnalyticsBody(
-                state: state,
-                page: page,
-                aggregate:
-                    state.aggregate.asData?.value ??
-                    CampaignAnalyticsAggregate.empty(),
-                lossReport: LossReportBuilder.build(
-                  state.allRecords.asData?.value ?? const [],
-                ),
-                onPageChange: controller.setPage,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _exportToExcel(
+Future<void> exportAnalyticsToExcel(
     BuildContext context,
     CampaignAnalyticsState state,
+    String campaignName,
   ) async {
     final records = state.allRecords.asData?.value ?? const [];
     if (records.isEmpty) {
@@ -151,7 +51,7 @@ class CampaignAnalyticsScreen extends ConsumerWidget {
     }
   }
 
-  void _openDashboardSettings(
+void openDashboardSettings(
     BuildContext context,
     CampaignAnalyticsState state,
     CampaignAnalyticsController controller,
@@ -238,7 +138,7 @@ class CampaignAnalyticsScreen extends ConsumerWidget {
     );
   }
 
-  void _openFilters(
+void openAnalyticsFilters(
     BuildContext context,
     CampaignAnalyticsState state,
     CampaignAnalyticsController controller,
@@ -404,22 +304,21 @@ class CampaignAnalyticsScreen extends ConsumerWidget {
     );
   }
 
-  String _buildErrorMessage(Object error) {
+String analyticsErrorMessage(Object error) {
     final base = 'Не удалось загрузить аукционную аналитику.';
     if (kIsWeb && Uri.base.host.endsWith('github.io')) {
       return '$base\n\nДля web-версии на GitHub Pages backend OmniBoard блокирует часть запросов CORS-ограничениями. Открой Netlify deploy, где запросы идут через proxy.';
     }
     return '$base\n$error';
-  }
 }
 
-class _Toolbar extends StatelessWidget {
+class AnalyticsToolbar extends StatelessWidget {
   final CampaignAnalyticsState state;
   final VoidCallback onSetLast24Hours;
   final VoidCallback onSetLast7Days;
   final VoidCallback onRefresh;
 
-  const _Toolbar({
+  const AnalyticsToolbar({
     required this.state,
     required this.onSetLast24Hours,
     required this.onSetLast7Days,
@@ -459,9 +358,11 @@ class _Toolbar extends StatelessWidget {
   }
 }
 
-const _kAnalyticsOrderKey = 'omni360-analytics-order';
-const _kAnalyticsWidthsKey = 'omni360-analytics-widths';
-const _kAnalyticsBlockIds = [
+// Единый дашборд кампании: блоки карточки кампании и блоки аукционной
+// аналитики лежат в одной сетке, поэтому и порядок с ширинами у них общие.
+const _kDashboardOrderKey = 'omni360-dashboard-order';
+const _kDashboardWidthsKey = 'omni360-dashboard-widths';
+const kAnalyticsBlockIds = [
   'summary',
   'states',
   'failures',
@@ -471,30 +372,49 @@ const _kAnalyticsBlockIds = [
   'operatorReport',
 ];
 
-typedef _AnalyticsBlock = ({String id, bool isWide, Widget child});
+typedef DashboardBlock = ({String id, bool isWide, Widget child});
 
-class _AnalyticsBody extends StatefulWidget {
+/// Сетка единого дашборда кампании.
+///
+/// Блоки аукционной аналитики строит сама, а блоки карточки кампании получает
+/// готовыми через [extraBlocks] — так обе группы попадают в одну сетку с общим
+/// перетаскиванием, ресайзом и сохранённым порядком.
+class CampaignDashboardBody extends StatefulWidget {
   final CampaignAnalyticsState state;
-  final CampaignImpressionsPage page;
+
+  /// null — аналитика ещё грузится или не загрузилась. Блоки кампании при
+  /// этом всё равно показываем: падение аналитики не должно уносить с собой
+  /// всю карточку.
+  final CampaignImpressionsPage? page;
   final CampaignAnalyticsAggregate aggregate;
   final LossReport lossReport;
   final ValueChanged<int> onPageChange;
+  final Map<String, DashboardBlock> extraBlocks;
+  final List<String> extraBlockIds;
 
-  const _AnalyticsBody({
+  const CampaignDashboardBody({
+    super.key,
     required this.state,
     required this.page,
     required this.aggregate,
     required this.lossReport,
     required this.onPageChange,
+    this.extraBlocks = const {},
+    this.extraBlockIds = const [],
   });
 
   @override
-  State<_AnalyticsBody> createState() => _AnalyticsBodyState();
+  State<CampaignDashboardBody> createState() => _CampaignDashboardBodyState();
 }
 
-class _AnalyticsBodyState extends State<_AnalyticsBody> {
-  List<String> _order = _kAnalyticsBlockIds;
+class _CampaignDashboardBodyState extends State<CampaignDashboardBody> {
+  late List<String> _order = _defaultOrder;
   Map<String, double> _widths = {};
+
+  List<String> get _defaultOrder => [
+    ...widget.extraBlockIds,
+    ...kAnalyticsBlockIds,
+  ];
 
   @override
   void initState() {
@@ -504,11 +424,11 @@ class _AnalyticsBodyState extends State<_AnalyticsBody> {
   }
 
   Future<void> _loadOrder() async {
-    final saved = await LocalOrderStore.instance.loadOrder(_kAnalyticsOrderKey);
+    final saved = await LocalOrderStore.instance.loadOrder(_kDashboardOrderKey);
     if (saved != null && mounted) {
       setState(
         () => _order = LocalOrderStore.instance.mergeOrder(
-          _kAnalyticsBlockIds,
+          _defaultOrder,
           saved,
         ),
       );
@@ -517,22 +437,22 @@ class _AnalyticsBodyState extends State<_AnalyticsBody> {
 
   Future<void> _loadWidths() async {
     final saved = await LocalOrderStore.instance.loadWidths(
-      _kAnalyticsWidthsKey,
+      _kDashboardWidthsKey,
     );
     if (saved != null && mounted) {
       setState(() => _widths = saved);
     }
   }
 
-  void _onReorder(List<_AnalyticsBlock> newOrder) {
+  void _onReorder(List<DashboardBlock> newOrder) {
     final ids = newOrder.map((b) => b.id).toList();
     setState(() => _order = ids);
-    LocalOrderStore.instance.saveOrder(_kAnalyticsOrderKey, ids);
+    LocalOrderStore.instance.saveOrder(_kDashboardOrderKey, ids);
   }
 
   void _onResize(String id, double fraction) {
     setState(() => _widths = {..._widths, id: fraction});
-    LocalOrderStore.instance.saveWidths(_kAnalyticsWidthsKey, _widths);
+    LocalOrderStore.instance.saveWidths(_kDashboardWidthsKey, _widths);
   }
 
   @override
@@ -543,7 +463,7 @@ class _AnalyticsBodyState extends State<_AnalyticsBody> {
     final lossReport = widget.lossReport;
     final onPageChange = widget.onPageChange;
 
-    final records = page.content;
+    final records = page?.content ?? const <CampaignImpressionRecord>[];
     final stateCounts = aggregate.stateCounts;
     final failureCounts = aggregate.failureCounts;
     final wins = aggregate.wins;
@@ -559,7 +479,11 @@ class _AnalyticsBodyState extends State<_AnalyticsBody> {
         'GID: ${state.query.inventoryGid}',
     ].join(' • ');
 
-    final blocksById = <String, _AnalyticsBlock>{
+    // Блоки аналитики добавляем только когда данные пришли: без них сетка
+    // всё равно покажет карточку кампании.
+    final analyticsBlocks = page == null
+        ? const <String, DashboardBlock>{}
+        : <String, DashboardBlock>{
       if (state.prefs.showSummary)
         'summary': (
           id: 'summary',
@@ -702,14 +626,23 @@ class _AnalyticsBodyState extends State<_AnalyticsBody> {
         ),
     };
 
+    final blocksById = <String, DashboardBlock>{
+      ...widget.extraBlocks,
+      ...analyticsBlocks,
+    };
+
     final blocks = [
       for (final id in _order)
         if (blocksById.containsKey(id)) blocksById[id]!,
+      // Блоки, которых не было в сохранённом порядке (новые или добавленные
+      // карточкой кампании), иначе бы они просто не отрисовались.
+      for (final entry in blocksById.entries)
+        if (!_order.contains(entry.key)) entry.value,
     ];
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
-      child: ReorderableFlexWrap<_AnalyticsBlock>(
+      child: ReorderableFlexWrap<DashboardBlock>(
         items: blocks,
         idOf: (b) => b.id,
         onReorder: _onReorder,
