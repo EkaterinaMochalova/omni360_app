@@ -559,7 +559,10 @@ class _PlanFactCard extends StatelessWidget {
     final planDaily = (s != null && s.planDailyBudget > 0)
         ? s.planDailyBudget
         : campaign.dailyBudget;
-    final planOts = (s != null && s.planOts > 0) ? s.planOts : campaign.ots;
+    // По OTS план берём только из самой кампании: otsCount и reservedBudgetStat
+    // в статистике заполнены и тогда, когда лимит по OTS не выставлен, — это
+    // расчётные величины, а не план. Нет лимита в кампании — значит прочерк.
+    final planOts = campaign.ots;
 
     // Бюджет
     if (planBudget != null && planBudget > 0) {
@@ -846,7 +849,8 @@ class _DetailedStatsCard extends StatelessWidget {
 
     final planBudget = firstPositive(s?.planBudget, campaign.budget);
     final planDailyBudget = firstPositive(s?.planDailyBudget, campaign.dailyBudget);
-    final planOts = firstPositive(s?.planOts, campaign.ots);
+    // Только лимит из кампании — см. пояснение в блоке «План / Факт».
+    final planOts = firstPositive(campaign.ots, null);
 
     final rows = <_DetailedStatRowData>[
       _DetailedStatRowData(
@@ -986,45 +990,33 @@ class _LimitsCard extends StatelessWidget {
       spentOverride: spent,
     );
 
-    final rows = <Widget>[];
+    // Раньше при нерассчитанном лимите блок писал «нет бюджета или дат» —
+    // причина могла быть совсем другой (кампания закончилась, бюджет уже
+    // израсходован), и сообщение просто вводило в заблуждение. Называем
+    // настоящую причину, а факт показываем всегда: он от лимита не зависит.
+    final reason = _whyNoLimit(pace);
 
-    void addRow(String label, double limit, double? fact, String hint) {
-      if (limit <= 0) return;
-      rows.add(
-        _PlanFactRow(
-          label: label,
-          plan: fmtRub.format(limit),
-          fact: (fact != null && fact > 0) ? fmtRub.format(fact) : null,
-          ratio: (fact != null && fact > 0) ? fact / limit : null,
-        ),
-      );
-      rows.add(
-        Padding(
-          padding: const EdgeInsets.only(bottom: 4),
-          child: Text(
-            hint,
-            style: const TextStyle(color: kTextSecondary, fontSize: 11),
-          ),
+    Widget row(String label, double limit, double? fact, String hint) {
+      final hasFact = fact != null && fact > 0;
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 2),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _PlanFactRow(
+              label: label,
+              plan: limit > 0 ? fmtRub.format(limit) : '—',
+              fact: hasFact ? fmtRub.format(fact) : null,
+              ratio: (hasFact && limit > 0) ? fact / limit : null,
+            ),
+            Text(
+              hint,
+              style: const TextStyle(color: kTextSecondary, fontSize: 11),
+            ),
+          ],
         ),
       );
     }
-
-    addRow(
-      'В сутки',
-      pace.dailyLimit,
-      stats?.factDailyBudget,
-      pace.broadcastDaysLeft > 0
-          ? 'Остаток ÷ ${pace.broadcastDaysLeft} дн. вещания'
-          : 'Дней вещания впереди нет',
-    );
-    addRow(
-      'В час',
-      pace.hourlyLimit,
-      stats?.hourlyBudgetFact,
-      pace.broadcastHoursLeft > 0
-          ? 'Остаток ÷ ${pace.broadcastHoursLeft.toStringAsFixed(0)} ч вещания'
-          : 'Часов вещания впереди нет',
-    );
 
     return _Card(
       child: Column(
@@ -1040,25 +1032,45 @@ class _LimitsCard extends StatelessWidget {
           ),
           const SizedBox(height: 2),
           Text(
-            pace.scheduleResolved && !pace.hasTimeRestrictions
-                ? 'Кампания идёт круглосуточно'
-                : 'По расписанию вещания',
+            reason ??
+                (pace.scheduleResolved && !pace.hasTimeRestrictions
+                    ? 'Кампания идёт круглосуточно'
+                    : 'Рекомендуемый лимит — по расписанию вещания'),
             style: const TextStyle(color: kTextSecondary, fontSize: 11),
           ),
-          const SizedBox(height: 6),
-          if (rows.isEmpty)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 10),
-              child: Text(
-                'Лимит не рассчитать: нет бюджета или дат кампании.',
-                style: TextStyle(color: kTextSecondary, fontSize: 12),
-              ),
-            )
-          else
-            ...rows,
+          const SizedBox(height: 8),
+          row(
+            'В сутки',
+            pace.dailyLimit,
+            stats?.factDailyBudget,
+            pace.broadcastDaysLeft > 0
+                ? 'Рекомендуем: остаток ÷ ${pace.broadcastDaysLeft} дн. вещания'
+                : 'Рекомендуемый лимит не рассчитан',
+          ),
+          row(
+            'В час',
+            pace.hourlyLimit,
+            stats?.hourlyBudgetFact,
+            pace.broadcastHoursLeft > 0
+                ? 'Рекомендуем: остаток ÷ '
+                      '${pace.broadcastHoursLeft.toStringAsFixed(0)} ч вещания'
+                : 'Рекомендуемый лимит не рассчитан',
+          ),
         ],
       ),
     );
+  }
+
+  /// Почему рекомендуемый лимит равен нулю. null — он рассчитан нормально.
+  String? _whyNoLimit(CampaignPaceSummary pace) {
+    if (pace.dailyLimit > 0 || pace.hourlyLimit > 0) return null;
+    if (pace.budget <= 0) return 'Бюджет кампании не задан';
+    if (pace.startDate == null || pace.endDate == null) {
+      return 'Даты кампании не заданы';
+    }
+    if (pace.remainingBudget <= 0) return 'Бюджет кампании уже израсходован';
+    if (pace.daysLeft <= 0) return 'Кампания уже закончилась';
+    return 'Впереди нет часов вещания по расписанию';
   }
 }
 

@@ -138,8 +138,19 @@ class Campaign {
       customerName: customer?['name']?.toString(),
       brandId: _toInt(brand?['id']),
       brandName: brand?['name']?.toString(),
-      budget: _toDouble(json['totalBudget'] ?? json['budget']),
-      dailyBudget: _toDouble(json['dailyBudget'] ?? json['budgetPerDay']),
+      // В детальном ответе бюджет лежит не там, где в списочном: наверху
+      // totalBudget может быть пустым, а сумма — внутри budgetConfig. Из-за
+      // этого блок «Выполнение лимита» считал, что бюджета нет вовсе.
+      budget: _firstNumber(json, const [
+        'totalBudget',
+        'budget',
+        'budgetBuyer',
+      ], nested: json['budgetConfig']),
+      dailyBudget: _firstNumber(json, const [
+        'dailyBudget',
+        'budgetPerDay',
+        'dailyBudgetBuyer',
+      ], nested: json['budgetConfig']),
       spent: _toDouble(json['spent'] ?? json['spentBudget']),
       // maxImpressionsCount сюда не берём: это лимит показов, а не контактов,
       // и он подставлялся первым — из-за него план по OTS показывался даже у
@@ -164,6 +175,27 @@ class Campaign {
       formats: _extractFormats(json),
       timeSettings: TimeSlot.collectFrom(json),
     );
+  }
+
+  /// Первое положительное число из [keys] — сначала на верхнем уровне, потом
+  /// внутри [nested] (например budgetConfig). Именно положительное: часть
+  /// полей приходит нулями, а не отсутствует.
+  static double? _firstNumber(
+    Map<String, dynamic> json,
+    List<String> keys, {
+    dynamic nested,
+  }) {
+    for (final key in keys) {
+      final value = _toDouble(json[key]);
+      if (value != null && value > 0) return value;
+    }
+    if (nested is Map) {
+      for (final key in keys) {
+        final value = _toDouble(nested[key]);
+        if (value != null && value > 0) return value;
+      }
+    }
+    return null;
   }
 
   /// Сумма OTS по всем инвентарям во всех сегментах (единиц × 1000 контактов)

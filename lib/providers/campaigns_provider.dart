@@ -95,6 +95,15 @@ final campaignDetailProvider = FutureProvider.family<Campaign, String>((
     '[DEBUG detail] maxImpressionsCount=${data['maxImpressionsCount']} maxDailyImpressionsCount=${data['maxDailyImpressionsCount']}',
   );
   final campaign = Campaign.fromJson(data);
+  if ((campaign.budget ?? 0) <= 0) {
+    // Без бюджета не считается рекомендуемый лимит — печатаем, где его искать.
+    // ignore: avoid_print
+    print(
+      '[DEBUG budget] не найден: totalBudget=${data['totalBudget']} '
+      'budget=${data['budget']} budgetBuyer=${data['budgetBuyer']} '
+      'budgetConfig=${data['budgetConfig']}',
+    );
+  }
   // ignore: avoid_print
   print(
     '[DEBUG detail] strategy=${data['strategy']} '
