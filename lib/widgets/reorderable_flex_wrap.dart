@@ -3,6 +3,14 @@ import 'package:flutter/material.dart';
 const double _kMinWidthFraction = 0.22;
 const double _kMinTileWidth = 220;
 
+/// Шаг сетки при ресайзе. Крупный намеренно: с мелким шагом выставить
+/// плашки в один уровень мышью почти невозможно — они всё время расходятся
+/// на пару пикселей. С привязкой соседние плашки сами встают ровно.
+const double _kGridStepPx = 40;
+const double _kMinTileHeight = 120;
+
+double _snap(double value, double step) => (value / step).round() * step;
+
 /// Сетка с переносом (аналог CSS flex-wrap) с ручным drag-and-drop
 /// переупорядочиванием элементов через ручку-«грипп» слева. Ширина элемента
 /// считается по доступной ширине контейнера: обычные элементы занимают одну
@@ -28,6 +36,11 @@ class ReorderableFlexWrap<T> extends StatefulWidget {
   final double Function(T item)? widthFractionOf;
   final void Function(String id, double fraction)? onResize;
 
+  /// Заданная вручную высота плашки в пикселях. null/0 — высота по
+  /// содержимому, как было до появления ресайза по вертикали.
+  final double? Function(T item)? heightOf;
+  final void Function(String id, double? height)? onResizeHeight;
+
   const ReorderableFlexWrap({
     super.key,
     required this.items,
@@ -40,6 +53,8 @@ class ReorderableFlexWrap<T> extends StatefulWidget {
     required this.onReorder,
     this.widthFractionOf,
     this.onResize,
+    this.heightOf,
+    this.onResizeHeight,
   });
 
   @override
@@ -53,6 +68,7 @@ class _ReorderableFlexWrapState<T> extends State<ReorderableFlexWrap<T>> {
 
   String? _resizingId;
   double _resizeDeltaPx = 0;
+  double _resizeDeltaPy = 0;
 
   void _reorder(String draggedId, String targetId) {
     if (draggedId == targetId) return;
@@ -95,17 +111,38 @@ class _ReorderableFlexWrapState<T> extends State<ReorderableFlexWrap<T>> {
                 _kMinWidthFraction,
                 1.0,
               );
-              final liveFraction = isResizingThis
-                  ? ((baseFraction * maxWidth + _resizeDeltaPx) / maxWidth)
-                        .clamp(_kMinWidthFraction, 1.0)
-                  : baseFraction;
               final minTileWidth = _kMinTileWidth < maxWidth
                   ? _kMinTileWidth
                   : maxWidth;
-              width = (liveFraction * maxWidth).clamp(minTileWidth, maxWidth);
+
+              // Тянем по пикселям и привязываем к шагу сетки, чтобы соседние
+              // плашки вставали ровно, а не расходились на пару пикселей.
+              final rawWidth = isResizingThis
+                  ? baseFraction * maxWidth + _resizeDeltaPx
+                  : baseFraction * maxWidth;
+              width = _snap(rawWidth, _kGridStepPx).clamp(
+                minTileWidth,
+                maxWidth,
+              );
             } else {
               final wide = columns > 1 && (widget.isWide?.call(item) ?? false);
               width = wide ? columnWidth * 2 + widget.spacing : columnWidth;
+            }
+
+            // Высота: null — по содержимому. Задать её вручную можно тем же
+            // уголком, потянув вниз.
+            final heightEnabled =
+                widget.heightOf != null && widget.onResizeHeight != null;
+            final baseHeight = heightEnabled ? widget.heightOf!(item) : null;
+            double? height;
+            if (heightEnabled) {
+              final raw = isResizingThis
+                  ? (baseHeight ?? _kMinTileHeight) + _resizeDeltaPy
+                  : baseHeight;
+              if (raw != null) {
+                final snapped = _snap(raw, _kGridStepPx);
+                height = snapped < _kMinTileHeight ? _kMinTileHeight : snapped;
+              }
             }
 
             final isDragged = _draggedId == id;
@@ -127,6 +164,7 @@ class _ReorderableFlexWrapState<T> extends State<ReorderableFlexWrap<T>> {
                   ? Duration.zero
                   : const Duration(milliseconds: 150),
               width: width,
+              height: height,
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(14),
                 border: Border.all(
@@ -164,7 +202,14 @@ class _ReorderableFlexWrapState<T> extends State<ReorderableFlexWrap<T>> {
                           }),
                           child: grip,
                         ),
-                        Expanded(child: content),
+                        // При заданной высоте содержимое может не влезть —
+                        // прокручиваем его внутри плашки, а не роняем в
+                        // overflow полосками поверх интерфейса.
+                        Expanded(
+                          child: height == null
+                              ? content
+                              : SingleChildScrollView(child: content),
+                        ),
                       ],
                     ),
                     if (resizeEnabled)
@@ -172,25 +217,50 @@ class _ReorderableFlexWrapState<T> extends State<ReorderableFlexWrap<T>> {
                         right: 0,
                         bottom: 0,
                         child: MouseRegion(
-                          cursor: SystemMouseCursors.resizeLeftRight,
+                          cursor: heightEnabled
+                              ? SystemMouseCursors.resizeDownRight
+                              : SystemMouseCursors.resizeLeftRight,
                           child: GestureDetector(
                             behavior: HitTestBehavior.opaque,
                             onPanStart: (_) => setState(() {
                               _resizingId = id;
                               _resizeDeltaPx = 0;
+                              _resizeDeltaPy = 0;
                             }),
                             onPanUpdate: (details) => setState(() {
                               _resizeDeltaPx += details.delta.dx;
+                              _resizeDeltaPy += details.delta.dy;
                             }),
                             onPanEnd: (_) {
-                              final finalFraction =
-                                  ((baseFraction * maxWidth + _resizeDeltaPx) /
-                                          maxWidth)
-                                      .clamp(_kMinWidthFraction, 1.0);
-                              widget.onResize!(id, finalFraction);
+                              final snappedWidth = _snap(
+                                baseFraction * maxWidth + _resizeDeltaPx,
+                                _kGridStepPx,
+                              );
+                              widget.onResize!(
+                                id,
+                                (snappedWidth / maxWidth).clamp(
+                                  _kMinWidthFraction,
+                                  1.0,
+                                ),
+                              );
+
+                              if (heightEnabled) {
+                                final raw =
+                                    (baseHeight ?? _kMinTileHeight) +
+                                    _resizeDeltaPy;
+                                // Утащили выше минимума — считаем это отменой
+                                // ручной высоты и возвращаем «по содержимому».
+                                final snapped = _snap(raw, _kGridStepPx);
+                                widget.onResizeHeight!(
+                                  id,
+                                  snapped < _kMinTileHeight ? null : snapped,
+                                );
+                              }
+
                               setState(() {
                                 _resizingId = null;
                                 _resizeDeltaPx = 0;
+                                _resizeDeltaPy = 0;
                               });
                             },
                             child: Container(

@@ -14,9 +14,7 @@ import '../utils/pace_alerts.dart';
 import '../utils/broadcast_schedule.dart';
 
 const _kDetailBlockIds = [
-  'status',
-  'dates',
-  'photo',
+  'overview',
   'planFact',
   'limits',
   'detailed',
@@ -201,20 +199,17 @@ class _CampaignDetailScreenState extends ConsumerState<CampaignDetailScreen> {
         ),
         data: (campaign) {
           final blocksById = <String, DashboardBlock>{
-            'status': (
-              id: 'status',
-              isWide: false,
-              child: _StatusCard(campaign: campaign),
-            ),
-            'dates': (
-              id: 'dates',
-              isWide: false,
-              child: _DatesCard(campaign: campaign),
-            ),
-            'photo': (
-              id: 'photo',
-              isWide: false,
-              child: _PhotoCoverageCard(coverage: photoCoverage),
+            // Статус, даты, фотоотчёты и сводка по запросам — один обзорный
+            // блок: по отдельности это четыре почти пустые карточки.
+            'overview': (
+              id: 'overview',
+              isWide: true,
+              child: _OverviewCard(
+                campaign: campaign,
+                coverage: photoCoverage,
+                aggregate: analytics.aggregate.valueOrNull,
+                aggregateLoading: analytics.aggregate.isLoading,
+              ),
             ),
             'planFact': (
               id: 'planFact',
@@ -347,13 +342,15 @@ class _CampaignDetailScreenState extends ConsumerState<CampaignDetailScreen> {
 
 class _StatusCard extends StatelessWidget {
   final Campaign campaign;
-  const _StatusCard({required this.campaign});
+  final bool bare;
+  const _StatusCard({required this.campaign, this.bare = false});
 
   @override
   Widget build(BuildContext context) {
     final fg = _statusStyle(campaign.status).$3;
     final label = campaign.displayStatus;
     return _Card(
+      bare: bare,
       child: Row(
         children: [
           Container(
@@ -421,7 +418,8 @@ class _StatusCard extends StatelessWidget {
 
 class _DatesCard extends StatelessWidget {
   final Campaign campaign;
-  const _DatesCard({required this.campaign});
+  final bool bare;
+  const _DatesCard({required this.campaign, this.bare = false});
 
   @override
   Widget build(BuildContext context) {
@@ -429,6 +427,7 @@ class _DatesCard extends StatelessWidget {
       return const SizedBox.shrink();
     }
     return _Card(
+      bare: bare,
       child: Row(
         children: [
           const Icon(
@@ -452,11 +451,13 @@ class _DatesCard extends StatelessWidget {
 class _PhotoCoverageCard extends StatelessWidget {
   final AsyncValue<CampaignPhotoCoverage> coverage;
 
-  const _PhotoCoverageCard({required this.coverage});
+  final bool bare;
+  const _PhotoCoverageCard({required this.coverage, this.bare = false});
 
   @override
   Widget build(BuildContext context) {
     return _Card(
+      bare: bare,
       child: coverage.when(
         loading: () => const Row(
           children: [
@@ -960,6 +961,88 @@ class _DetailedStatsCard extends StatelessWidget {
   }
 }
 
+/// Обзор кампании: статус, даты, фотоотчёты и сводка по запросам в одном
+/// блоке. По отдельности это были четыре карточки в одну-две строки каждая.
+class _OverviewCard extends StatelessWidget {
+  final Campaign campaign;
+  final AsyncValue<CampaignPhotoCoverage> coverage;
+  final CampaignAnalyticsAggregate? aggregate;
+  final bool aggregateLoading;
+
+  const _OverviewCard({
+    required this.campaign,
+    required this.coverage,
+    required this.aggregate,
+    required this.aggregateLoading,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return _Card(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _StatusCard(campaign: campaign, bare: true),
+          const SizedBox(height: 10),
+          _DatesCard(campaign: campaign, bare: true),
+          const SizedBox(height: 10),
+          _PhotoCoverageCard(coverage: coverage, bare: true),
+          const Divider(height: 22, color: kBorder),
+          _requestsSummary(),
+        ],
+      ),
+    );
+  }
+
+  Widget _requestsSummary() {
+    final data = aggregate;
+    if (data == null || data.totalRequests == 0) {
+      return Text(
+        aggregateLoading
+            ? 'Сводка по запросам загружается…'
+            : 'Нет запросов за выбранный период.',
+        style: const TextStyle(color: kTextSecondary, fontSize: 12),
+      );
+    }
+
+    final fmt = NumberFormat.decimalPattern('ru_RU');
+    final successRate = data.successes / data.totalRequests * 100;
+    final lossRate = data.losses / data.totalRequests * 100;
+
+    return Wrap(
+      spacing: 18,
+      runSpacing: 8,
+      children: [
+        _metric('Запросов', fmt.format(data.totalRequests)),
+        _metric('Успешные показы', fmt.format(data.successes)),
+        _metric('% успешных', '${successRate.toStringAsFixed(1)}%'),
+        _metric('Проигрыши', fmt.format(data.losses)),
+        _metric('% проигрышей', '${lossRate.toStringAsFixed(1)}%'),
+      ],
+    );
+  }
+
+  Widget _metric(String label, String value) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(color: kTextSecondary, fontSize: 11),
+        ),
+        Text(
+          value,
+          style: const TextStyle(
+            color: kTextPrimary,
+            fontSize: 15,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 /// Насколько выбран суточный и часовой лимит прямо сейчас.
 ///
 /// Рекомендуемый лимит — остаток бюджета, разложенный по оставшимся дням и
@@ -1277,10 +1360,17 @@ class _AlertBanner extends StatelessWidget {
 
 class _Card extends StatelessWidget {
   final Widget child;
-  const _Card({required this.child});
+
+  /// true — отдать содержимое без рамки и отступов: карточку вкладывают в
+  /// другую карточку, и вторая рамка вокруг неё выглядит мусором.
+  final bool bare;
+
+  const _Card({required this.child, this.bare = false});
 
   @override
-  Widget build(BuildContext context) => Container(
+  Widget build(BuildContext context) => bare
+      ? child
+      : Container(
     padding: const EdgeInsets.all(16),
     decoration: BoxDecoration(
       color: Colors.white,

@@ -14,6 +14,7 @@ import '../services/file_saver_stub.dart'
     if (dart.library.html) '../services/file_saver_web.dart';
 import '../services/local_order_store.dart';
 import '../widgets/card_section.dart';
+import '../widgets/donut_breakdown.dart';
 import '../widgets/loss_report_sections.dart';
 import '../widgets/reorderable_flex_wrap.dart';
 
@@ -371,10 +372,9 @@ class AnalyticsToolbar extends StatelessWidget {
 // аналитики лежат в одной сетке, поэтому и порядок с ширинами у них общие.
 const _kDashboardOrderKey = 'omni360-dashboard-order';
 const _kDashboardWidthsKey = 'omni360-dashboard-widths';
+const _kDashboardHeightsKey = 'omni360-dashboard-heights';
 const kAnalyticsBlockIds = [
-  'summary',
   'states',
-  'failures',
   'requests',
   'daily',
   'bidReport',
@@ -382,6 +382,42 @@ const kAnalyticsBlockIds = [
 ];
 
 typedef DashboardBlock = ({String id, bool isWide, Widget child});
+
+// Две разные палитры: на одной диаграмме лежат статусы и причины проигрышей,
+// и по цвету должно быть видно, к какой группе относится доля.
+const _kStatePalette = [
+  Color(0xFF2E7D32),
+  Color(0xFF1565C0),
+  Color(0xFF00897B),
+  Color(0xFF5E35B1),
+  Color(0xFF00ACC1),
+];
+const _kFailurePalette = [
+  Color(0xFFE53935),
+  Color(0xFFF9A825),
+  Color(0xFFD81B60),
+  Color(0xFFFB8C00),
+  Color(0xFF8E24AA),
+  Color(0xFF6D4C41),
+];
+
+List<DonutSlice> _slicesOf(
+  Map<String, int> counts,
+  String group,
+  List<Color> palette,
+) {
+  final entries = counts.entries.where((e) => e.value > 0).toList()
+    ..sort((a, b) => b.value.compareTo(a.value));
+  return [
+    for (var i = 0; i < entries.length; i++)
+      DonutSlice(
+        label: entries[i].key,
+        value: entries[i].value,
+        color: palette[i % palette.length],
+        group: group,
+      ),
+  ];
+}
 
 /// Блок, который зависит от полной выгрузки показов: пока она грузится или
 /// если она отвалилась, показываем состояние вместо пустой таблицы.
@@ -456,6 +492,7 @@ class CampaignDashboardBody extends StatefulWidget {
 class _CampaignDashboardBodyState extends State<CampaignDashboardBody> {
   late List<String> _order = _defaultOrder;
   Map<String, double> _widths = {};
+  Map<String, double> _heights = {};
 
   List<String> get _defaultOrder => [
     ...widget.extraBlockIds,
@@ -467,6 +504,30 @@ class _CampaignDashboardBodyState extends State<CampaignDashboardBody> {
     super.initState();
     _loadOrder();
     _loadWidths();
+    _loadHeights();
+  }
+
+  Future<void> _loadHeights() async {
+    final saved = await LocalOrderStore.instance.loadWidths(
+      _kDashboardHeightsKey,
+    );
+    if (saved != null && mounted) {
+      setState(() => _heights = saved);
+    }
+  }
+
+  void _onResizeHeight(String id, double? height) {
+    setState(() {
+      final next = {..._heights};
+      // null — «высота по содержимому», такую запись просто убираем.
+      if (height == null) {
+        next.remove(id);
+      } else {
+        next[id] = height;
+      }
+      _heights = next;
+    });
+    LocalOrderStore.instance.saveWidths(_kDashboardHeightsKey, _heights);
   }
 
   Future<void> _loadOrder() async {
@@ -512,92 +573,36 @@ class _CampaignDashboardBodyState extends State<CampaignDashboardBody> {
     final records = page?.content ?? const <CampaignImpressionRecord>[];
     final stateCounts = aggregate.stateCounts;
     final failureCounts = aggregate.failureCounts;
-    final wins = aggregate.wins;
-    final losses = aggregate.losses;
-    final successes = aggregate.successes;
-    final lossRate =
-        aggregate.totalRequests == 0 ? 0.0 : losses / aggregate.totalRequests;
-    final hasScreenFilter =
-        state.query.address.isNotEmpty || state.query.inventoryGid.isNotEmpty;
-    final selectedScreenLabel = [
-      if (state.query.address.isNotEmpty) state.query.address,
-      if (state.query.inventoryGid.isNotEmpty)
-        'GID: ${state.query.inventoryGid}',
-    ].join(' • ');
+    // Победы/проигрыши/фильтр по экрану больше не нужны здесь: эти цифры
+    // переехали в обзорный блок карточки кампании вместе со «Сводкой».
 
     // Блоки аналитики добавляем только когда данные пришли: без них сетка
     // всё равно покажет карточку кампании.
     final analyticsBlocks = page == null
         ? const <String, DashboardBlock>{}
         : <String, DashboardBlock>{
-      if (state.prefs.showSummary)
-        'summary': (
-          id: 'summary',
-          isWide: true,
-          child: CardSection(
-            title: 'Сводка',
-            subtitle: hasScreenFilter ? selectedScreenLabel : null,
-            child: Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              children: [
-                _MetricCard(
-                  label: 'Запросов',
-                  value: '${aggregate.totalRequests}',
-                ),
-                _MetricCard(label: 'Победы', value: '$wins'),
-                _MetricCard(label: 'Проигрыши', value: '$losses'),
-                if (hasScreenFilter)
-                  _MetricCard(
-                    label: 'Процент проигрышей',
-                    value: '${(lossRate * 100).toStringAsFixed(1)}%',
-                  ),
-                _MetricCard(label: 'Успешные показы', value: '$successes'),
-                _MetricCard(
-                  label: '% успешных показов',
-                  value: aggregate.totalRequests == 0
-                      ? '—'
-                      : '${(successes / aggregate.totalRequests * 100).toStringAsFixed(1)}%',
-                ),
-              ],
-            ),
-          ),
-        ),
-      if (state.prefs.showStateBreakdown)
+      // Блок «Сводка» переехал в обзорный блок карточки кампании — там те же
+      // цифры стоят рядом со статусом и датами, а не отдельной плашкой.
+      // Статусы и причины проигрышей — один срез одних и тех же запросов,
+      // поэтому они на одной кольцевой диаграмме, а не в двух списках рядом.
+      if (state.prefs.showStateBreakdown || state.prefs.showFailureBreakdown)
         'states': (
           id: 'states',
-          isWide: false,
+          isWide: true,
           child: CardSection(
-            title: 'Статусы запросов',
-            child: Column(
-              children: stateCounts.entries
-                  .map(
-                    (entry) => _BreakdownRow(
-                      label: entry.key,
-                      value: entry.value,
-                      total: aggregate.totalRequests,
-                    ),
-                  )
-                  .toList(),
-            ),
-          ),
-        ),
-      if (state.prefs.showFailureBreakdown && failureCounts.isNotEmpty)
-        'failures': (
-          id: 'failures',
-          isWide: false,
-          child: CardSection(
-            title: 'Причины проигрышей',
-            child: Column(
-              children: failureCounts.entries
-                  .map(
-                    (entry) => _BreakdownRow(
-                      label: entry.key,
-                      value: entry.value,
-                      total: aggregate.totalRequests,
-                    ),
-                  )
-                  .toList(),
+            title: 'Статусы и причины проигрышей',
+            subtitle: 'Всего запросов: ${aggregate.totalRequests}',
+            child: DonutBreakdown(
+              slices: [
+                if (state.prefs.showStateBreakdown)
+                  ..._slicesOf(stateCounts, 'Статусы', _kStatePalette),
+                if (state.prefs.showFailureBreakdown)
+                  ..._slicesOf(
+                    failureCounts,
+                    'Причины проигрышей',
+                    _kFailurePalette,
+                  ),
+              ],
             ),
           ),
         ),
@@ -710,6 +715,8 @@ class _CampaignDashboardBodyState extends State<CampaignDashboardBody> {
         itemBuilder: (context, b) => b.child,
         widthFractionOf: (b) => _widths[b.id] ?? (b.isWide ? 1.0 : 0.48),
         onResize: _onResize,
+        heightOf: (b) => _heights[b.id],
+        onResizeHeight: _onResizeHeight,
       ),
     );
   }
