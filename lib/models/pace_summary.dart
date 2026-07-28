@@ -46,6 +46,11 @@ class CampaignPaceSummary {
   /// как ненадёжную рано — она просто ещё не окончательная.
   final bool scheduleLoading;
 
+  /// Лимиты, выставленные в кампании сейчас, — чтобы было видно, надо
+  /// рекомендуемый поднимать или опускать. null — лимит не задан.
+  final double? currentDailyLimit;
+  final double? currentHourlyLimit;
+
   const CampaignPaceSummary({
     required this.id,
     required this.name,
@@ -66,7 +71,21 @@ class CampaignPaceSummary {
     this.scheduleResolved = false,
     this.hasTimeRestrictions = false,
     this.scheduleLoading = false,
+    this.currentDailyLimit,
+    this.currentHourlyLimit,
   });
+
+  /// Во сколько раз рекомендуемый лимит отличается от установленного.
+  /// null — сравнивать не с чем. >1 — надо поднимать, <1 — снижать.
+  double? get dailyLimitFactor =>
+      (currentDailyLimit != null && currentDailyLimit! > 0 && dailyLimit > 0)
+      ? dailyLimit / currentDailyLimit!
+      : null;
+
+  double? get hourlyLimitFactor =>
+      (currentHourlyLimit != null && currentHourlyLimit! > 0 && hourlyLimit > 0)
+      ? hourlyLimit / currentHourlyLimit!
+      : null;
 
   double get pctSpent => budget <= 0 ? 0 : spent / budget;
 
@@ -110,6 +129,7 @@ class CampaignPaceSummary {
     // удалось (это не то же самое, что расписание без ограничений).
     BroadcastSchedule? schedule,
     bool scheduleLoading = false,
+    double? currentHourlyLimit,
   }) {
     final start = _parseDate(campaign.startDate);
     final end = _parseDate(campaign.endDate);
@@ -179,6 +199,8 @@ class CampaignPaceSummary {
       scheduleResolved: schedule != null || hasSchedule(campaign.timeSettings),
       hasTimeRestrictions: hasSchedule(slots),
       scheduleLoading: scheduleLoading,
+      currentDailyLimit: campaign.dailyBudget,
+      currentHourlyLimit: currentHourlyLimit,
       id: campaign.id,
       name: campaign.name,
       startDate: start,

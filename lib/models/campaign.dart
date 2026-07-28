@@ -141,10 +141,12 @@ class Campaign {
       budget: _toDouble(json['totalBudget'] ?? json['budget']),
       dailyBudget: _toDouble(json['dailyBudget'] ?? json['budgetPerDay']),
       spent: _toDouble(json['spent'] ?? json['spentBudget']),
+      // maxImpressionsCount сюда не берём: это лимит показов, а не контактов,
+      // и он подставлялся первым — из-за него план по OTS показывался даже у
+      // кампаний, где лимит по OTS не задан вовсе, причём числом другого
+      // порядка. Нет настоящего OTS — пусть будет null и прочерк в интерфейсе.
       ots:
-          _toDouble(
-            json['maxImpressionsCount'] ?? json['ots'] ?? json['totalOts'],
-          ) ??
+          _toDouble(json['ots'] ?? json['totalOts']) ??
           _otsFromSegments(json['segments']),
       exits: _toDouble(json['exits'] ?? json['totalExits'] ?? json['plays']),
       startDate: _trimDate(json['startDate']?.toString()),

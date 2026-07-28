@@ -90,14 +90,12 @@ class BudgetsPaceScreen extends ConsumerWidget {
           final summaries =
               rows
                   .map((c) {
-                    // Поле spent из списка кампаний часто пустое/нулевое —
-                    // как и на карточке кампании, в этом случае берём
-                    // фактический бюджет из impression-stats.
-                    final cardStats = (c.spent == null || c.spent! <= 0)
-                        ? ref
-                              .watch(campaignStatsProvider(c.id))
-                              .whenOrNull(data: (s) => s)
-                        : null;
+                    // Статистику берём всегда: из неё и фактический бюджет
+                    // (поле spent в списке часто пустое), и установленный
+                    // часовой лимит — с ним сравниваем рекомендуемый.
+                    final cardStats = ref
+                        .watch(campaignStatsProvider(c.id))
+                        .whenOrNull(data: (s) => s);
                     final spentOverride = (c.spent != null && c.spent! > 0)
                         ? c.spent!
                         : (cardStats?.factBudget ?? 0.0);
@@ -113,6 +111,7 @@ class BudgetsPaceScreen extends ConsumerWidget {
                       spentOverride: spentOverride,
                       schedule: scheduleAsync.valueOrNull,
                       scheduleLoading: scheduleAsync.isLoading,
+                      currentHourlyLimit: cardStats?.hourlyBudgetPlan,
                     );
                   })
                   .where((s) => s.totalDays > 0)
@@ -161,8 +160,14 @@ class BudgetsPaceScreen extends ConsumerWidget {
                     DataColumn(label: Text('Темп'), numeric: true),
                     DataColumn(label: Text('Остаток'), numeric: true),
                     DataColumn(label: Text('Ост. дней'), numeric: true),
-                    DataColumn(label: Text('Лимит/сутки'), numeric: true),
-                    DataColumn(label: Text('Лимит/час'), numeric: true),
+                    DataColumn(
+                      label: Text('Рекоменд. лимит/сутки'),
+                      numeric: true,
+                    ),
+                    DataColumn(
+                      label: Text('Рекоменд. лимит/час'),
+                      numeric: true,
+                    ),
                   ],
                   rows: [
                     ...summaries.map((s) => _paceRow(s)),
@@ -285,7 +290,12 @@ class BudgetsPaceScreen extends ConsumerWidget {
               'Остаток ÷ ${s.broadcastDaysLeft} дн. (кампания идёт круглосуточно)',
               'Остаток ÷ ${s.daysLeft} календарных дн.',
             ),
-            child: _limitText(s, _fmtRub.format(s.dailyLimit)),
+            child: _limitCell(
+              s,
+              s.dailyLimit,
+              s.currentDailyLimit,
+              s.dailyLimitFactor,
+            ),
           ),
         ),
         DataCell(
@@ -300,7 +310,12 @@ class BudgetsPaceScreen extends ConsumerWidget {
               'Расписание не загрузилось — считаем круглые сутки '
                   '(${_fmtHours.format(s.broadcastHoursLeft)} ч)',
             ),
-            child: _limitText(s, _fmtRub.format(s.hourlyLimit)),
+            child: _limitCell(
+              s,
+              s.hourlyLimit,
+              s.currentHourlyLimit,
+              s.hourlyLimitFactor,
+            ),
           ),
         ),
       ],
@@ -360,6 +375,38 @@ class BudgetsPaceScreen extends ConsumerWidget {
   ) {
     if (!s.scheduleResolved) return unresolved;
     return s.hasTimeRestrictions ? restricted : roundTheClock;
+  }
+
+  /// Рекомендуемый лимит и, если установленный лимит известен, — насколько
+  /// его надо менять. Без этого сравнения непонятно, поднимать или снижать.
+  Widget _limitCell(
+    CampaignPaceSummary s,
+    double recommended,
+    double? current,
+    double? factor,
+  ) {
+    final value = _limitText(s, _fmtRub.format(recommended));
+    if (factor == null || current == null) return value;
+
+    // Разница в пределах 5% — шум, гонять лимит из-за неё незачем.
+    final aligned = (factor - 1).abs() < 0.05;
+    final raise = factor > 1;
+    final color = aligned
+        ? kTextSecondary
+        : (raise ? const Color(0xFFF9A825) : const Color(0xFF2E7D32));
+    final label = aligned
+        ? 'как сейчас'
+        : '${raise ? '↑' : '↓'} ${(factor * 100).toStringAsFixed(0)}% '
+              'от ${_fmtRub.format(current)}';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        value,
+        Text(label, style: TextStyle(color: color, fontSize: 11)),
+      ],
+    );
   }
 
   /// Звёздочка — только когда расписание не загрузилось. Кампания без

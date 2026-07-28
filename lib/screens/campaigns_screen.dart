@@ -935,10 +935,18 @@ class _CampaignCard extends ConsumerWidget {
         ? (effectiveSpent / c.budget!).clamp(0.0, 1.0)
         : null;
 
-    // Алерты — загружаем stats только для активных кампаний
-    final alertDots = c.isActive && cardStats != null
+    // Алерты считаются от расписания, а в списочном ответе timeSettings нет:
+    // без него кампания выглядела вещающей круглосуточно, и «Недотрата» с
+    // «Нет выходов/час» загорались в часы, когда она законно молчит. Пока
+    // расписание не загрузилось, плашки не показываем — лучше ничего, чем
+    // ложная тревога. Запросы ограничены тремя одновременными в провайдере.
+    final schedule = c.isActive
+        ? ref.watch(campaignScheduleProvider(c.id)).valueOrNull
+        : null;
+
+    final alertDots = c.isActive && cardStats != null && schedule != null
         ? () {
-            final alerts = buildAlerts(c, cardStats);
+            final alerts = buildAlerts(c, cardStats, schedule: schedule.slots);
             if (alerts.isEmpty) return null;
             final hasOver = alerts.any((a) => a.type == PaceType.over);
             final hasNoExits = alerts.any((a) => a.type == PaceType.noExits);

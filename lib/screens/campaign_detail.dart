@@ -7,6 +7,7 @@ import '../providers/campaign_analytics_provider.dart';
 import '../models/campaign.dart';
 import '../models/campaign_analytics.dart';
 import '../models/loss_report.dart';
+import '../models/pace_summary.dart';
 import 'campaign_analytics_screen.dart';
 import '../widgets/stats_chart.dart';
 import '../utils/pace_alerts.dart';
@@ -17,6 +18,7 @@ const _kDetailBlockIds = [
   'dates',
   'photo',
   'planFact',
+  'limits',
   'detailed',
   'chart',
 ];
@@ -220,6 +222,14 @@ class _CampaignDetailScreenState extends ConsumerState<CampaignDetailScreen> {
               child: stats.maybeWhen(
                 data: (s) => _PlanFactCard(campaign: campaign, stats: s),
                 orElse: () => _PlanFactCard(campaign: campaign, stats: null),
+              ),
+            ),
+            'limits': (
+              id: 'limits',
+              isWide: false,
+              child: _LimitsCard(
+                campaign: campaign,
+                stats: stats.asData?.value,
               ),
             ),
             'detailed': (
@@ -943,6 +953,112 @@ class _DetailedStatsCard extends StatelessWidget {
   static double? _ratio(double? plan, double? fact) {
     if (plan == null || fact == null || plan <= 0 || fact <= 0) return null;
     return fact / plan;
+  }
+}
+
+/// Насколько выбран суточный и часовой лимит прямо сейчас.
+///
+/// Рекомендуемый лимит — остаток бюджета, разложенный по оставшимся дням и
+/// часам вещания (та же арифметика, что в таблице темпов). Факт — сколько
+/// реально ушло за сегодня и за последний час.
+class _LimitsCard extends StatelessWidget {
+  final Campaign campaign;
+  final CampaignStats? stats;
+
+  const _LimitsCard({required this.campaign, required this.stats});
+
+  @override
+  Widget build(BuildContext context) {
+    final fmtRub = NumberFormat.currency(
+      locale: 'ru_RU',
+      symbol: '₽',
+      decimalDigits: 0,
+    );
+
+    final spent = (campaign.spent != null && campaign.spent! > 0)
+        ? campaign.spent!
+        : (stats?.factBudget ?? 0);
+    // Расписание берём из самой кампании: детальный ответ его уже содержит,
+    // так что лишнего запроса здесь не нужно.
+    final pace = CampaignPaceSummary.fromCampaign(
+      campaign,
+      DateTime.now(),
+      spentOverride: spent,
+    );
+
+    final rows = <Widget>[];
+
+    void addRow(String label, double limit, double? fact, String hint) {
+      if (limit <= 0) return;
+      rows.add(
+        _PlanFactRow(
+          label: label,
+          plan: fmtRub.format(limit),
+          fact: (fact != null && fact > 0) ? fmtRub.format(fact) : null,
+          ratio: (fact != null && fact > 0) ? fact / limit : null,
+        ),
+      );
+      rows.add(
+        Padding(
+          padding: const EdgeInsets.only(bottom: 4),
+          child: Text(
+            hint,
+            style: const TextStyle(color: kTextSecondary, fontSize: 11),
+          ),
+        ),
+      );
+    }
+
+    addRow(
+      'В сутки',
+      pace.dailyLimit,
+      stats?.factDailyBudget,
+      pace.broadcastDaysLeft > 0
+          ? 'Остаток ÷ ${pace.broadcastDaysLeft} дн. вещания'
+          : 'Дней вещания впереди нет',
+    );
+    addRow(
+      'В час',
+      pace.hourlyLimit,
+      stats?.hourlyBudgetFact,
+      pace.broadcastHoursLeft > 0
+          ? 'Остаток ÷ ${pace.broadcastHoursLeft.toStringAsFixed(0)} ч вещания'
+          : 'Часов вещания впереди нет',
+    );
+
+    return _Card(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Выполнение лимита',
+            style: TextStyle(
+              color: kTextPrimary,
+              fontSize: 15,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            pace.scheduleResolved && !pace.hasTimeRestrictions
+                ? 'Кампания идёт круглосуточно'
+                : 'По расписанию вещания',
+            style: const TextStyle(color: kTextSecondary, fontSize: 11),
+          ),
+          const SizedBox(height: 6),
+          if (rows.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 10),
+              child: Text(
+                'Лимит не рассчитать: нет бюджета или дат кампании.',
+                style: TextStyle(color: kTextSecondary, fontSize: 12),
+              ),
+            )
+          else
+            ...rows,
+        ],
+      ),
+    );
   }
 }
 
