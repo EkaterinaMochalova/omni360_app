@@ -12,6 +12,7 @@ import 'campaign_analytics_screen.dart';
 import '../widgets/stats_chart.dart';
 import '../utils/pace_alerts.dart';
 import '../utils/broadcast_schedule.dart';
+import '../widgets/loading_placeholders.dart';
 
 const _kDetailBlockIds = [
   'overview',
@@ -997,11 +998,36 @@ class _OverviewCard extends StatelessWidget {
   Widget _requestsSummary() {
     final data = aggregate;
     if (data == null || data.totalRequests == 0) {
-      return Text(
-        aggregateLoading
-            ? 'Сводка по запросам загружается…'
-            : 'Нет запросов за выбранный период.',
-        style: const TextStyle(color: kTextSecondary, fontSize: 12),
+      if (!aggregateLoading) {
+        return const Text(
+          'Нет запросов за выбранный период.',
+          style: TextStyle(color: kTextSecondary, fontSize: 12),
+        );
+      }
+      // Заглушки на месте будущих цифр — понятнее, чем строка текста.
+      return Wrap(
+        spacing: 18,
+        runSpacing: 8,
+        children: [
+          for (final label in const [
+            'Запросов',
+            'Успешные показы',
+            '% успешных',
+            'Проигрыши',
+            '% проигрышей',
+          ])
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: const TextStyle(color: kTextSecondary, fontSize: 11),
+                ),
+                const SizedBox(height: 3),
+                const ShimmerBox(width: 56, height: 15),
+              ],
+            ),
+        ],
       );
     }
 
@@ -1066,11 +1092,15 @@ class _LimitsCard extends StatelessWidget {
         ? campaign.spent!
         : (stats?.factBudget ?? 0);
     // Расписание берём из самой кампании: детальный ответ его уже содержит,
-    // так что лишнего запроса здесь не нужно.
+    // так что лишнего запроса здесь не нужно. Бюджет — с запасным вариантом
+    // из статистики: в детальном ответе он не всегда заполнен, и без него
+    // рекомендуемый лимит молча получался нулевым.
     final pace = CampaignPaceSummary.fromCampaign(
       campaign,
       DateTime.now(),
       spentOverride: spent,
+      budgetOverride: stats?.planBudget,
+      currentHourlyLimit: stats?.hourlyBudgetPlan,
     );
 
     // Раньше при нерассчитанном лимите блок писал «нет бюджета или дат» —
@@ -1079,19 +1109,60 @@ class _LimitsCard extends StatelessWidget {
     // настоящую причину, а факт показываем всегда: он от лимита не зависит.
     final reason = _whyNoLimit(pace);
 
-    Widget row(String label, double limit, double? fact, String hint) {
+    // Раньше эти строки рисовались через «План / Факт», и рекомендуемый лимит
+    // читался как установленный. Подписываем все три величины явно.
+    Widget row(
+      String label,
+      double recommended,
+      double? current,
+      double? fact,
+      String hint,
+    ) {
       final hasFact = fact != null && fact > 0;
       return Padding(
-        padding: const EdgeInsets.only(bottom: 2),
+        padding: const EdgeInsets.only(bottom: 10),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _PlanFactRow(
-              label: label,
-              plan: limit > 0 ? fmtRub.format(limit) : '—',
-              fact: hasFact ? fmtRub.format(fact) : null,
-              ratio: (hasFact && limit > 0) ? fact / limit : null,
+            Text(
+              label,
+              style: const TextStyle(
+                color: kTextPrimary,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
             ),
+            const SizedBox(height: 4),
+            Wrap(
+              spacing: 16,
+              runSpacing: 4,
+              children: [
+                _value(
+                  'Рекомендуем',
+                  recommended > 0 ? fmtRub.format(recommended) : '—',
+                  kAccent,
+                ),
+                _value(
+                  'Установлен',
+                  (current != null && current > 0)
+                      ? fmtRub.format(current)
+                      : '—',
+                  kTextSecondary,
+                ),
+                _value(
+                  'Ушло',
+                  hasFact ? fmtRub.format(fact) : '—',
+                  kTextPrimary,
+                ),
+                if (hasFact && recommended > 0)
+                  _value(
+                    'Выбрано лимита',
+                    '${(fact / recommended * 100).toStringAsFixed(0)}%',
+                    fact > recommended ? Colors.red : const Color(0xFF2E7D32),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 2),
             Text(
               hint,
               style: const TextStyle(color: kTextSecondary, fontSize: 11),
@@ -1125,22 +1196,44 @@ class _LimitsCard extends StatelessWidget {
           row(
             'В сутки',
             pace.dailyLimit,
+            pace.currentDailyLimit,
             stats?.factDailyBudget,
             pace.broadcastDaysLeft > 0
-                ? 'Рекомендуем: остаток ÷ ${pace.broadcastDaysLeft} дн. вещания'
+                ? 'Рекомендуем остаток ÷ ${pace.broadcastDaysLeft} дн. вещания'
                 : 'Рекомендуемый лимит не рассчитан',
           ),
           row(
             'В час',
             pace.hourlyLimit,
+            pace.currentHourlyLimit,
             stats?.hourlyBudgetFact,
             pace.broadcastHoursLeft > 0
-                ? 'Рекомендуем: остаток ÷ '
+                ? 'Рекомендуем остаток ÷ '
                       '${pace.broadcastHoursLeft.toStringAsFixed(0)} ч вещания'
                 : 'Рекомендуемый лимит не рассчитан',
           ),
         ],
       ),
+    );
+  }
+
+  Widget _value(String label, String value, Color color) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(color: kTextSecondary, fontSize: 10),
+        ),
+        Text(
+          value,
+          style: TextStyle(
+            color: color,
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
     );
   }
 

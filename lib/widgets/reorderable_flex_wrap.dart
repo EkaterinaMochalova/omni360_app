@@ -3,13 +3,29 @@ import 'package:flutter/material.dart';
 const double _kMinWidthFraction = 0.22;
 const double _kMinTileWidth = 220;
 
-/// Шаг сетки при ресайзе. Крупный намеренно: с мелким шагом выставить
-/// плашки в один уровень мышью почти невозможно — они всё время расходятся
-/// на пару пикселей. С привязкой соседние плашки сами встают ровно.
+/// Ширину привязываем к колонкам, а не к абсолютным пикселям: при шаге в
+/// пикселях сумма ширин почти никогда не совпадает с шириной строки, и справа
+/// оставалась пустая полоса, а плашки перестали выравниваться. Колоночная
+/// сетка по формуле cols/N * (доступная ширина + промежуток) − промежуток
+/// раскладывается ровно, без остатка.
+const int _kGridColumns = 12;
+
+/// Высоту достаточно привязать к пикселям — по вертикали ничего не тайлится.
 const double _kGridStepPx = 40;
 const double _kMinTileHeight = 120;
 
 double _snap(double value, double step) => (value / step).round() * step;
+
+/// Сколько колонок сетки занимает ширина [raw].
+int _columnsFor(double raw, double maxWidth, double spacing) {
+  final unit = (maxWidth + spacing) / _kGridColumns;
+  return (((raw + spacing) / unit).round()).clamp(1, _kGridColumns);
+}
+
+double _widthForColumns(int columns, double maxWidth, double spacing) {
+  final width = columns / _kGridColumns * (maxWidth + spacing) - spacing;
+  return width < 0 ? maxWidth : width;
+}
 
 /// Сетка с переносом (аналог CSS flex-wrap) с ручным drag-and-drop
 /// переупорядочиванием элементов через ручку-«грипп» слева. Ширина элемента
@@ -111,19 +127,19 @@ class _ReorderableFlexWrapState<T> extends State<ReorderableFlexWrap<T>> {
                 _kMinWidthFraction,
                 1.0,
               );
-              final minTileWidth = _kMinTileWidth < maxWidth
-                  ? _kMinTileWidth
-                  : maxWidth;
-
-              // Тянем по пикселям и привязываем к шагу сетки, чтобы соседние
-              // плашки вставали ровно, а не расходились на пару пикселей.
+              // Тянем по пикселям, но кладём на колоночную сетку — тогда
+              // соседние плашки складываются в строку без зазора справа.
               final rawWidth = isResizingThis
                   ? baseFraction * maxWidth + _resizeDeltaPx
                   : baseFraction * maxWidth;
-              width = _snap(rawWidth, _kGridStepPx).clamp(
-                minTileWidth,
-                maxWidth,
-              );
+              final columns = _columnsFor(rawWidth, maxWidth, widget.spacing);
+              width = _widthForColumns(columns, maxWidth, widget.spacing);
+              // На узком экране колонка может оказаться уже минимума — тогда
+              // растягиваем на всю доступную ширину, а не режем содержимое.
+              if (width < _kMinTileWidth && maxWidth >= _kMinTileWidth) {
+                width = _kMinTileWidth;
+              }
+              if (width > maxWidth) width = maxWidth;
             } else {
               final wide = columns > 1 && (widget.isWide?.call(item) ?? false);
               width = wide ? columnWidth * 2 + widget.spacing : columnWidth;
@@ -164,7 +180,6 @@ class _ReorderableFlexWrapState<T> extends State<ReorderableFlexWrap<T>> {
                   ? Duration.zero
                   : const Duration(milliseconds: 150),
               width: width,
-              height: height,
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(14),
                 border: Border.all(
@@ -202,13 +217,20 @@ class _ReorderableFlexWrapState<T> extends State<ReorderableFlexWrap<T>> {
                           }),
                           child: grip,
                         ),
-                        // При заданной высоте содержимое может не влезть —
-                        // прокручиваем его внутри плашки, а не роняем в
-                        // overflow полосками поверх интерфейса.
+                        // Высота — это минимум, а не жёсткий размер. Жёсткий
+                        // обрезал карточку: скруглённые углы и тень уходили
+                        // под границу, а содержимое некуда было девать.
+                        // С минимумом карточка растягивается до заданной
+                        // высоты и растёт дальше, если содержимому мало.
                         Expanded(
                           child: height == null
                               ? content
-                              : SingleChildScrollView(child: content),
+                              : ConstrainedBox(
+                                  constraints: BoxConstraints(
+                                    minHeight: height,
+                                  ),
+                                  child: content,
+                                ),
                         ),
                       ],
                     ),
@@ -232,9 +254,15 @@ class _ReorderableFlexWrapState<T> extends State<ReorderableFlexWrap<T>> {
                               _resizeDeltaPy += details.delta.dy;
                             }),
                             onPanEnd: (_) {
-                              final snappedWidth = _snap(
+                              final columns = _columnsFor(
                                 baseFraction * maxWidth + _resizeDeltaPx,
-                                _kGridStepPx,
+                                maxWidth,
+                                widget.spacing,
+                              );
+                              final snappedWidth = _widthForColumns(
+                                columns,
+                                maxWidth,
+                                widget.spacing,
                               );
                               widget.onResize!(
                                 id,

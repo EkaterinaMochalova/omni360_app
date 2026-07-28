@@ -26,8 +26,8 @@ class DonutSlice {
 
 /// Кольцевая диаграмма с легендой сбоку.
 ///
-/// Наведение на долю показывает всплывающую подсказку с числом и процентом,
-/// наведение на пункт легенды подсвечивает соответствующую долю — связь в обе
+/// Наведение на долю показывает её число и процент в центре кольца, наведение
+/// на пункт легенды подсвечивает соответствующую долю — связь работает в обе
 /// стороны, иначе на диаграмме с десятком долей не понять, что где.
 class DonutBreakdown extends StatefulWidget {
   final List<DonutSlice> slices;
@@ -65,7 +65,15 @@ class _DonutBreakdownState extends State<DonutBreakdown> {
         final chart = SizedBox(
           height: 190,
           width: 190,
-          child: _chart(slices, total),
+          // Цифры выбранной доли — в центре кольца, а не выноской у края:
+          // выноска налезала на легенду и перекрывала её пункты.
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              _chart(slices, total),
+              IgnorePointer(child: _center(slices, total)),
+            ],
+          ),
         );
         final legend = _legend(slices, total);
 
@@ -109,7 +117,7 @@ class _DonutBreakdownState extends State<DonutBreakdown> {
         ),
         sections: [
           for (var i = 0; i < slices.length; i++)
-            _section(slices[i], i, total, i == _active),
+            _section(slices[i], i == _active),
         ],
       ),
       // Без явной длительности перерисовка на каждом движении курсора
@@ -119,28 +127,74 @@ class _DonutBreakdownState extends State<DonutBreakdown> {
     );
   }
 
-  PieChartSectionData _section(
-    DonutSlice slice,
-    int index,
-    int total,
-    bool active,
-  ) {
-    final percent = total == 0 ? 0.0 : slice.value / total * 100;
+  PieChartSectionData _section(DonutSlice slice, bool active) {
     return PieChartSectionData(
       value: slice.value.toDouble(),
       color: active ? slice.color : slice.color.withValues(alpha: 0.85),
       radius: active ? 46 : 38,
       showTitle: false,
-      // Всплывающая карточка с цифрами — вместо подписи прямо на доле, которая
-      // на мелких сегментах всё равно не читается.
-      badgeWidget: active
-          ? _Tooltip(
-              label: slice.label,
-              value: slice.value,
-              percent: percent,
-            )
-          : null,
-      badgePositionPercentageOffset: 1.45,
+    );
+  }
+
+  /// Центр кольца: цифры наведённой доли, а если ничего не наведено — всего.
+  Widget _center(List<DonutSlice> slices, int total) {
+    final index = _active;
+    final active = (index != null && index >= 0 && index < slices.length)
+        ? slices[index]
+        : null;
+
+    if (active == null) {
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            _fmtInt.format(total),
+            style: const TextStyle(
+              color: kTextPrimary,
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const Text(
+            'всего',
+            style: TextStyle(color: kTextSecondary, fontSize: 11),
+          ),
+        ],
+      );
+    }
+
+    final percent = total == 0 ? 0.0 : active.value / total * 100;
+    return SizedBox(
+      width: 92,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            active.label,
+            textAlign: TextAlign.center,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: active.color,
+              fontSize: 10,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            _fmtInt.format(active.value),
+            style: const TextStyle(
+              color: kTextPrimary,
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          Text(
+            '${percent.toStringAsFixed(1)}%',
+            style: const TextStyle(color: kTextSecondary, fontSize: 11),
+          ),
+        ],
+      ),
     );
   }
 
@@ -250,58 +304,6 @@ class _LegendRow extends StatelessWidget {
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _Tooltip extends StatelessWidget {
-  final String label;
-  final int value;
-  final double percent;
-
-  const _Tooltip({
-    required this.label,
-    required this.value,
-    required this.percent,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      constraints: const BoxConstraints(maxWidth: 190),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: kBorder),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.12),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              color: kTextPrimary,
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          Text(
-            '${_fmtInt.format(value)} · ${percent.toStringAsFixed(1)}%',
-            style: const TextStyle(color: kTextSecondary, fontSize: 11),
-          ),
-        ],
       ),
     );
   }

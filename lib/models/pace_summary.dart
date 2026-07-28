@@ -124,6 +124,9 @@ class CampaignPaceSummary {
     Campaign campaign,
     DateTime today, {
     double? spentOverride,
+    /// Бюджет из статистики, когда в самой кампании он не заполнен: без него
+    /// рекомендуемый лимит молча получался нулевым.
+    double? budgetOverride,
     // Расписание из детального ответа: в списочном timeSettings нет, поэтому
     // экран догружает его отдельно и передаёт сюда. null — загрузить не
     // удалось (это не то же самое, что расписание без ограничений).
@@ -133,7 +136,10 @@ class CampaignPaceSummary {
   }) {
     final start = _parseDate(campaign.startDate);
     final end = _parseDate(campaign.endDate);
-    final budget = campaign.budget ?? 0;
+    final campaignBudget = campaign.budget ?? 0;
+    final budget = campaignBudget > 0
+        ? campaignBudget
+        : (budgetOverride ?? 0);
     final spent = spentOverride ?? (campaign.spent ?? 0);
 
     if (start == null || end == null || budget <= 0) {

@@ -15,6 +15,7 @@ import '../services/file_saver_stub.dart'
 import '../services/local_order_store.dart';
 import '../widgets/card_section.dart';
 import '../widgets/donut_breakdown.dart';
+import '../widgets/loading_placeholders.dart';
 import '../widgets/loss_report_sections.dart';
 import '../widgets/reorderable_flex_wrap.dart';
 
@@ -431,14 +432,19 @@ Widget _fromAllRecords(
     loading: () => CardSection(
       title: title,
       subtitle: 'Считаем по всем показам за период',
+      // Строки-заглушки вместо крутилки: сразу видно, что здесь будет
+      // таблица, и что она именно грузится, а не пуста.
       child: const Padding(
-        padding: EdgeInsets.symmetric(vertical: 20),
-        child: Center(
-          child: SizedBox(
-            width: 22,
-            height: 22,
-            child: CircularProgressIndicator(color: kAccent, strokeWidth: 2.5),
-          ),
+        padding: EdgeInsets.symmetric(vertical: 4),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ShimmerBox(width: 260, height: 12),
+            SizedBox(height: 10),
+            ShimmerBox(width: 200, height: 12),
+            SizedBox(height: 10),
+            ShimmerBox(width: 230, height: 12),
+          ],
         ),
       ),
     ),

@@ -6,6 +6,7 @@ import '../main.dart';
 import '../models/pace_summary.dart';
 import '../providers/campaigns_provider.dart';
 import '../widgets/app_sidebar.dart';
+import '../widgets/loading_placeholders.dart';
 
 final _fmtRub = NumberFormat.currency(
   locale: 'ru_RU',
@@ -414,9 +415,16 @@ class BudgetsPaceScreen extends ConsumerWidget {
   /// расписание ещё едет — это многоточие, а не признак недостоверности.
   Widget _limitText(CampaignPaceSummary s, String value) {
     if (s.scheduleResolved) return Text(value);
-    return Text(
-      s.scheduleLoading ? '$value…' : '$value*',
-      style: const TextStyle(color: kTextSecondary),
-    );
+    if (s.scheduleLoading) {
+      // Живое многоточие вместо статичного: видно, что расписание ещё едет.
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(value, style: const TextStyle(color: kTextSecondary)),
+          const LoadingDots(),
+        ],
+      );
+    }
+    return Text('$value*', style: const TextStyle(color: kTextSecondary));
   }
 }
