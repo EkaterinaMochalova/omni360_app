@@ -113,8 +113,9 @@ class _DonutBreakdownState extends State<DonutBreakdown> {
         ],
       ),
       // Без явной длительности перерисовка на каждом движении курсора
-      // выглядит как дрожание.
-      duration: const Duration(milliseconds: 120),
+      // выглядит как дрожание. В fl_chart 0.68 параметр называется
+      // swapAnimationDuration — на duration его переименовали позже.
+      swapAnimationDuration: const Duration(milliseconds: 120),
     );
   }
 
