@@ -425,10 +425,39 @@ List<DonutSlice> _slicesOf(
 Widget _fromAllRecords(
   AsyncValue<List<CampaignImpressionRecord>> records,
   String title,
-  Widget Function() build,
-) {
+  Widget Function() build, {
+  bool complete = true,
+}) {
   return records.when(
-    data: (_) => build(),
+    data: (loaded) => complete
+        ? build()
+        : Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Неполная выгрузка раньше показывалась как полная — цифры
+              // выглядели достоверными, хотя часть показов не доехала.
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 6,
+                ),
+                margin: const EdgeInsets.only(bottom: 10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFF3E0),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  'Выгрузка неполная: посчитано по ${loaded.length} показам. '
+                  'Сузьте период, чтобы увидеть все.',
+                  style: const TextStyle(
+                    color: Color(0xFFE65100),
+                    fontSize: 11,
+                  ),
+                ),
+              ),
+              build(),
+            ],
+          ),
     loading: () => CardSection(
       title: title,
       subtitle: 'Считаем по всем показам за период',
@@ -672,6 +701,7 @@ class _CampaignDashboardBodyState extends State<CampaignDashboardBody> {
             state.allRecords,
             'Сводная по дням',
             () => DailyBreakdownSection(rows: lossReport.dailyBreakdown),
+            complete: state.allRecordsComplete,
           ),
         ),
       if (state.prefs.showBidReport)
@@ -682,6 +712,7 @@ class _CampaignDashboardBodyState extends State<CampaignDashboardBody> {
             state.allRecords,
             'Поднять ставки',
             () => BidRaiseReportSection(rows: lossReport.bidRaiseRows),
+            complete: state.allRecordsComplete,
           ),
         ),
       if (state.prefs.showOperatorReport)
@@ -694,6 +725,7 @@ class _CampaignDashboardBodyState extends State<CampaignDashboardBody> {
             () => OperatorIssueReportSection(
               groups: lossReport.operatorIssueGroups,
             ),
+            complete: state.allRecordsComplete,
           ),
         ),
     };

@@ -1,5 +1,8 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../api/auth_service.dart';
+import 'campaign_analytics_provider.dart';
+import 'campaigns_provider.dart';
+import 'service_dashboard_provider.dart';
 
 enum AuthStatus { unknown, authenticated, unauthenticated }
 
@@ -20,9 +23,26 @@ class AuthState {
 
 class AuthNotifier extends StateNotifier<AuthState> {
   final _service = AuthService();
+  final Ref _ref;
 
-  AuthNotifier() : super(const AuthState(status: AuthStatus.unknown)) {
+  AuthNotifier(this._ref) : super(const AuthState(status: AuthStatus.unknown)) {
     _checkToken();
+  }
+
+  /// Сбрасывает всё загруженное по кампаниям.
+  ///
+  /// Провайдеры данных живут дольше сессии, и без сброса после перелогина на
+  /// экране оставались кампании предыдущего логина — до ручного обновления
+  /// страницы. Чистим и при выходе, и при входе: выход может не случиться
+  /// вовсе (закрыли вкладку), а войти под другим логином — запросто.
+  void _resetCampaignData() {
+    _ref.invalidate(campaignsProvider);
+    _ref.invalidate(campaignDetailProvider);
+    _ref.invalidate(campaignStatsProvider);
+    _ref.invalidate(campaignPhotoCoverageProvider);
+    _ref.invalidate(campaignScheduleProvider);
+    _ref.invalidate(campaignAnalyticsProvider);
+    _ref.invalidate(serviceDashboardProvider);
   }
 
   Future<void> _checkToken() async {
@@ -38,6 +58,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
     state = const AuthState(status: AuthStatus.unknown);
     try {
       await _service.login(email, password);
+      _resetCampaignData();
       state = AuthState(status: AuthStatus.authenticated, email: email);
     } catch (e) {
       state = AuthState(
@@ -49,6 +70,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
 
   Future<void> logout() async {
     await _service.logout();
+    _resetCampaignData();
     state = const AuthState(status: AuthStatus.unauthenticated);
   }
 
@@ -65,5 +87,5 @@ class AuthNotifier extends StateNotifier<AuthState> {
 }
 
 final authProvider = StateNotifierProvider<AuthNotifier, AuthState>(
-  (_) => AuthNotifier(),
+  AuthNotifier.new,
 );

@@ -205,26 +205,37 @@ enum LossCategory {
   operatorIssue,
 }
 
-/// HEURISTIC: не проверено на реальных данных прод-API. Основной сигнал —
-/// числовое сравнение bid/bidFloor (как в исходном Excel-отчёте, где причина
-/// отказа текстом указывала "Ставка ниже чем минимальная ставка"). Если
-/// бэкенд когда-нибудь начнёт отдавать явный код причины про низкую ставку,
-/// он будет обработан первым без изменений в остальном коде.
-/// TODO: сверить с реальными показами — всегда ли bid/bidFloor заполнены
-/// у FAILED-записей, и встречается ли явный код причины "низкая ставка".
-/// Числа в тексте причины отклонения — там указывается выигравшая ставка.
 final _numberInText = RegExp(r'\d+(?:[.,]\d+)?');
 
+/// Число сразу после слова «выигравшая» — так формулирует причину бэкенд:
+/// «Ставка проиграла в аукционе ССП. Ставка - 5.39, выигравшая ставка - 5.90».
+final _winningBidInText = RegExp(
+  r'выигравш\w*[^0-9]{0,30}(\d+(?:[.,]\d+)?)',
+  caseSensitive: false,
+);
+
+/// Признаки того, что показ проигран в аукционе по ставке, а не потерян у
+/// оператора. Ищем в тексте причины: явного кода про ставку бэкенд не отдаёт.
+final _bidLossInText = RegExp(
+  r'ставка проиграла|проиграла в аукционе|выигравш\w*\s+ставка|'
+  r'ставка ниже|минимальн\w*\s+ставк',
+  caseSensitive: false,
+);
+
 /// Выигравшая ставка из причины отклонения, если она там названа.
-///
-/// Точная формулировка сообщения не зафиксирована в АПИ, поэтому берём
-/// наибольшее число в тексте: ставка — единственная крупная величина в таких
-/// сообщениях, а мелкие (номер попытки, код) её не перебьют. Если чисел нет
-/// вовсе — возвращаем null, и рекомендация считается от минимальной ставки.
 double? winningBidFromReason(CampaignImpressionRecord record) {
   final message = record.failureReasonMessage;
   if (message == null || message.trim().isEmpty) return null;
 
+  // Сначала число, названное выигравшей ставкой явно.
+  final named = _winningBidInText.firstMatch(message);
+  if (named != null) {
+    final value = double.tryParse(named.group(1)!.replaceAll(',', '.'));
+    if (value != null) return value;
+  }
+
+  // Иначе — наибольшее число в тексте: в таких сообщениях ставка обычно
+  // единственная крупная величина.
   double? best;
   for (final match in _numberInText.allMatches(message)) {
     final value = double.tryParse(match.group(0)!.replaceAll(',', '.'));
@@ -234,15 +245,33 @@ double? winningBidFromReason(CampaignImpressionRecord record) {
   return best;
 }
 
+/// Проигрыш по ставке или проблема на стороне оператора.
+///
+/// Раньше смотрели только на код и тип причины плюс сравнение bid с bidFloor.
+/// Этого не хватало: сообщение «Ставка проиграла в аукционе ССП» лежит в
+/// тексте причины, который вообще не проверялся, а минимальную ставку в таком
+/// проигрыше мы как раз прошли — уступили более высокой. Из-за этого явные
+/// проигрыши по ставке попадали в отчёт «К оператору».
 LossCategory classifyLoss(CampaignImpressionRecord record) {
   final code = record.failureReasonCodeName?.toUpperCase() ?? '';
   final type = record.failureReasonType?.toUpperCase() ?? '';
   if (code.contains('BID') || type.contains('BID') || type.contains('FLOOR')) {
     return LossCategory.lowBid;
   }
-  if (record.bid != null &&
-      record.bidFloor != null &&
-      record.bid! < record.bidFloor!) {
+
+  final message = record.failureReasonMessage ?? '';
+  if (_bidLossInText.hasMatch(message)) {
+    return LossCategory.lowBid;
+  }
+
+  // Названа ставка выше нашей — значит мы просто уступили в аукционе.
+  final winning = winningBidFromReason(record);
+  final bid = record.bid;
+  if (winning != null && bid != null && winning > bid) {
+    return LossCategory.lowBid;
+  }
+
+  if (bid != null && record.bidFloor != null && bid < record.bidFloor!) {
     return LossCategory.lowBid;
   }
   return LossCategory.operatorIssue;

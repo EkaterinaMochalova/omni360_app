@@ -1433,9 +1433,14 @@ class _AlertBanner extends StatelessWidget {
         : isOver
         ? '⚡'
         : '📉';
+    // pct — это отклонение, а не доля от темпа. Прежняя формулировка «100% от
+    // ожидаемого темпа» читалась как «ровно по плану», хотя означала ровно
+    // наоборот: не потрачено ничего.
     final text = isNoExits
         ? 'Нет выходов за последний час'
-        : '${isOver ? 'Перерасход' : 'Недотрата'} ${alert.metric}: ${alert.pct.toStringAsFixed(0)}% от ожидаемого темпа';
+        : '${isOver ? 'Перерасход' : 'Недотрата'} ${alert.metric}: '
+              'на ${alert.pct.toStringAsFixed(0)}% '
+              '${isOver ? 'выше' : 'ниже'} ожидаемого темпа';
 
     return Container(
       margin: const EdgeInsets.only(bottom: 6),

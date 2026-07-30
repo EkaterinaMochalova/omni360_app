@@ -77,6 +77,11 @@ class CampaignAnalyticsState {
   /// экспортом в Excel, чтобы не тянуть данные с бэкенда повторно.
   final AsyncValue<List<CampaignImpressionRecord>> allRecords;
 
+  /// Вся ли выгрузка догрузилась. false — часть страниц не пришла или период
+  /// оказался шире предела; отчёты по ним всё равно строятся, но об этом надо
+  /// сказать, а не показывать неполные цифры как полные.
+  final bool allRecordsComplete;
+
   const CampaignAnalyticsState({
     required this.impressions,
     required this.aggregate,
@@ -84,6 +89,7 @@ class CampaignAnalyticsState {
     required this.prefs,
     required this.query,
     required this.allRecords,
+    this.allRecordsComplete = true,
   });
 
   factory CampaignAnalyticsState.initial() => CampaignAnalyticsState(
@@ -102,6 +108,7 @@ class CampaignAnalyticsState {
     CampaignAnalyticsDashboardPrefs? prefs,
     CampaignAnalyticsQuery? query,
     AsyncValue<List<CampaignImpressionRecord>>? allRecords,
+    bool? allRecordsComplete,
   }) {
     return CampaignAnalyticsState(
       impressions: impressions ?? this.impressions,
@@ -110,6 +117,7 @@ class CampaignAnalyticsState {
       prefs: prefs ?? this.prefs,
       query: query ?? this.query,
       allRecords: allRecords ?? this.allRecords,
+      allRecordsComplete: allRecordsComplete ?? this.allRecordsComplete,
     );
   }
 }
@@ -170,6 +178,7 @@ class CampaignAnalyticsController
       impressions: const AsyncValue.loading(),
       aggregate: const AsyncValue.loading(),
       allRecords: const AsyncValue.loading(),
+      allRecordsComplete: true,
     );
 
     // Первая страница и полная выгрузка всех записей — независимые запросы, и
@@ -205,10 +214,11 @@ class CampaignAnalyticsController
 
   Future<void> _loadAggregateAndRecords(CampaignAnalyticsQuery query) async {
     try {
-      final (aggregate, allRecords) = await _fetchAggregateWithRecords(query);
+      final result = await _fetchAggregateWithRecords(query);
       state = state.copyWith(
-        aggregate: AsyncValue.data(aggregate),
-        allRecords: AsyncValue.data(allRecords),
+        aggregate: AsyncValue.data(result.aggregate),
+        allRecords: AsyncValue.data(result.records),
+        allRecordsComplete: result.complete,
       );
     } on DioException catch (e, st) {
       final serverDetails = _extractServerDetails(e);
@@ -383,15 +393,30 @@ class CampaignAnalyticsController
     return _fetchImpressionsWithFallback(query);
   }
 
-  Future<(CampaignAnalyticsAggregate, List<CampaignImpressionRecord>)>
+  Future<
+    ({
+      CampaignAnalyticsAggregate aggregate,
+      List<CampaignImpressionRecord> records,
+      bool complete,
+    })
+  >
   _fetchAggregateWithRecords(CampaignAnalyticsQuery query) async {
-    final records = await _fetchAllRecords(query);
-    return (CampaignAnalyticsAggregate.fromRecords(records), records);
+    final result = await _fetchAllRecords(query);
+    return (
+      aggregate: CampaignAnalyticsAggregate.fromRecords(result.records),
+      records: result.records,
+      complete: result.complete,
+    );
   }
 
-  Future<List<CampaignImpressionRecord>> _fetchAllRecords(
-    CampaignAnalyticsQuery query,
-  ) async {
+  /// Полная выгрузка показов за период.
+  ///
+  /// Возвращает и признак полноты: раньше выгрузка либо доходила до конца, либо
+  /// падала целиком, и отчёты молча строились по неполному набору или пропадали
+  /// совсем. Теперь при сбое пачки останавливаемся и честно отдаём то, что
+  /// успели, помечая результат неполным.
+  Future<({List<CampaignImpressionRecord> records, bool complete})>
+  _fetchAllRecords(CampaignAnalyticsQuery query) async {
     final aggregateQuery = query.copyWith(page: 0, size: 500);
     final firstResponse = await _fetchImpressionsWithFallback(aggregateQuery);
     final firstPage = CampaignImpressionsPage.fromJson(
@@ -399,32 +424,49 @@ class CampaignAnalyticsController
     );
     final allRecords = <CampaignImpressionRecord>[...firstPage.content];
 
+    // Верхняя граница по страницам: на широком периоде их бывают сотни, и
+    // экран уходил в многоминутное ожидание. 40 страниц по 500 — это 20 тысяч
+    // показов, дальше отчёты всё равно смотреть смысла мало.
+    const maxPages = 40;
+    final pagesToLoad = firstPage.totalPages < maxPages
+        ? firstPage.totalPages
+        : maxPages;
+    var complete = firstPage.totalPages <= pagesToLoad;
+
     // Страницы тянем ограниченными пачками, а не все разом: прокси/бэкенд и
     // так периодически отдаёт 502 под нагрузкой (см. isRetryableStatus в
     // _fetchImpressionsWithFallback), не стоит усугублять это залпом из
     // десятков параллельных запросов при большом объёме показов.
     const chunkSize = 6;
-    for (
-      var start = 1;
-      start < firstPage.totalPages;
-      start += chunkSize
-    ) {
-      final end = (start + chunkSize).clamp(0, firstPage.totalPages);
-      final chunkResponses = await Future.wait([
-        for (var pageIndex = start; pageIndex < end; pageIndex++)
-          _fetchImpressionsWithFallback(
-            aggregateQuery.copyWith(page: pageIndex),
-          ),
-      ]);
-      for (final response in chunkResponses) {
-        final page = CampaignImpressionsPage.fromJson(
-          response.data as Map<String, dynamic>,
+    for (var start = 1; start < pagesToLoad; start += chunkSize) {
+      final end = (start + chunkSize).clamp(0, pagesToLoad);
+      try {
+        final chunkResponses = await Future.wait([
+          for (var pageIndex = start; pageIndex < end; pageIndex++)
+            _fetchImpressionsWithFallback(
+              aggregateQuery.copyWith(page: pageIndex),
+            ),
+        ]);
+        for (final response in chunkResponses) {
+          final page = CampaignImpressionsPage.fromJson(
+            response.data as Map<String, dynamic>,
+          );
+          allRecords.addAll(page.content);
+        }
+      } catch (e) {
+        // Одна упавшая пачка не должна обнулять уже собранное: отдаём частичный
+        // результат, а интерфейс скажет, что данные неполные.
+        // ignore: avoid_print
+        print(
+          '[analytics] страницы $start–$end не загрузились, '
+          'отчёты строятся по ${allRecords.length} записям: $e',
         );
-        allRecords.addAll(page.content);
+        complete = false;
+        break;
       }
     }
 
-    return allRecords;
+    return (records: allRecords, complete: complete);
   }
 
   static String _formatSpaceDateTime(DateTime value) {
