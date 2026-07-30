@@ -193,17 +193,49 @@ final campaignStatsProvider = FutureProvider.family<CampaignStats, String>((
   return CampaignStats.empty();
 });
 
+/// Сторона, по которой показы были, а фотоотчёта нет.
+///
+/// Нужна, чтобы по проценту покрытия можно было сразу перейти к делу: кому из
+/// операторов и по каким экранам писать. Раньше видно было только сам процент.
+class PhotoMissingSide {
+  final String gid;
+  final String side;
+  final String operatorName;
+  final String city;
+  final int shows;
+
+  const PhotoMissingSide({
+    required this.gid,
+    required this.side,
+    required this.operatorName,
+    required this.city,
+    required this.shows,
+  });
+
+  /// GID со стороной, если сторона известна отдельным полем.
+  String get label => side.isEmpty ? gid : '$gid $side';
+}
+
 class CampaignPhotoCoverage {
   final int totalSides;
   final int sidesWithPhoto;
 
+  /// Стороны без фотоотчёта — по убыванию числа показов: сверху то, что дороже
+  /// всего осталось без подтверждения.
+  final List<PhotoMissingSide> missing;
+
   const CampaignPhotoCoverage({
     required this.totalSides,
     required this.sidesWithPhoto,
+    this.missing = const [],
   });
 
   double get percent =>
       totalSides > 0 ? (sidesWithPhoto / totalSides) * 100 : 0.0;
+
+  /// Сколько всего показов прошло на экранах без фотоотчёта.
+  int get missingShows =>
+      missing.fold(0, (sum, side) => sum + side.shows);
 }
 
 final campaignPhotoCoverageProvider =
@@ -289,13 +321,66 @@ final campaignPhotoCoverageProvider =
         return showed > 0 || budget > 0;
       }
 
+      // Имя оператора/города бэкенд отдаёт то строкой, то вложенным объектом, и
+      // ключ в этом ответе заранее не известен — перебираем варианты, а не
+      // жёстко один. Пустая строка вместо срыва: список GID полезен и без
+      // оператора.
+      String? nameOf(dynamic node) {
+        if (node is String) return node.trim().isEmpty ? null : node.trim();
+        if (node is Map) {
+          final name = node['name'] ?? node['title'] ?? node['shortName'];
+          final text = name?.toString().trim();
+          if (text != null && text.isNotEmpty) return text;
+        }
+        return null;
+      }
+
+      String pickName(Map<String, dynamic> row, List<String> keys) {
+        for (final key in keys) {
+          final value = nameOf(row[key]);
+          if (value != null) return value;
+        }
+        final inventory = row['inventory'];
+        if (inventory is Map) {
+          for (final key in keys) {
+            final value = nameOf(inventory[key]);
+            if (value != null) return value;
+          }
+        }
+        return '';
+      }
+
       final sidesWithShows = <String>{};
       final withPhotoKeys = <String>{};
+      final sideInfo = <String, PhotoMissingSide>{};
       for (final row in rows) {
         if (!hasShows(row)) continue;
         final sideKey = sideKeyFromRow(row);
         if (sideKey.isEmpty) continue;
         sidesWithShows.add(sideKey);
+
+        final inventory = row['inventory'];
+        final gid =
+            (inventory is Map ? inventory['name']?.toString() : null) ??
+            row['inventoryGid']?.toString() ??
+            sideKey;
+        final shows = (row['totalShowed'] as num?)?.toInt() ?? 0;
+        final known = sideInfo[sideKey];
+        sideInfo[sideKey] = PhotoMissingSide(
+          gid: gid,
+          side: row['side']?.toString() ?? '',
+          operatorName: pickName(row, const [
+            'displayOwnerDTO',
+            'displayOwner',
+            'displayOwnerName',
+            'operator',
+            'owner',
+          ]),
+          city: pickName(row, const ['city', 'cityName', 'cityDTO']),
+          // Одна сторона может прийти несколькими строками (разные креативы,
+          // дни) — показы складываем.
+          shows: (known?.shows ?? 0) + shows,
+        );
 
         final shotCount = (row['shotCount'] as num?)?.toInt() ?? 0;
         if (shotCount <= 0) continue;
@@ -305,10 +390,29 @@ final campaignPhotoCoverageProvider =
       final totalSides = sidesWithShows.length;
       final sidesWithPhoto = withPhotoKeys.length;
 
+      final missing =
+          sidesWithShows
+              .where((key) => !withPhotoKeys.contains(key))
+              .map((key) => sideInfo[key])
+              .whereType<PhotoMissingSide>()
+              .toList()
+            ..sort((a, b) => b.shows.compareTo(a.shows));
+
+      if (missing.isNotEmpty && missing.first.operatorName.isEmpty) {
+        // Диагностика: имя оператора не нашлось ни под одним из ожидаемых
+        // ключей — печатаем, что реально пришло, чтобы не угадывать.
+        // ignore: avoid_print
+        print(
+          '[photo-coverage $id] оператор не найден, ключи строки: '
+          '${rows.isEmpty ? '—' : rows.first.keys.toList()}',
+        );
+      }
+
       return CampaignPhotoCoverage(
         totalSides: totalSides,
         sidesWithPhoto: sidesWithPhoto > totalSides && totalSides > 0
             ? totalSides
             : sidesWithPhoto,
+        missing: missing,
       );
     });

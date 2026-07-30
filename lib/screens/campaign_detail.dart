@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../main.dart';
@@ -541,12 +542,147 @@ class _PhotoCoverageCard extends StatelessWidget {
                   minHeight: 6,
                 ),
               ),
+              // Разбор недостающих ФО — в диалоге, а не раскрытием внутри
+              // блока: список бывает в сотни строк и ломал бы заданную
+              // пользователем высоту блока.
+              if (value.missing.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: () => _showMissingPhotoSides(context, value),
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      minimumSize: const Size(0, 32),
+                      foregroundColor: kAccent,
+                    ),
+                    icon: const Icon(Icons.list_alt_rounded, size: 16),
+                    label: Text(
+                      'Показать GID экранов без фотоотчётов '
+                      '(${value.missing.length})',
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                  ),
+                ),
+              ],
             ],
           );
         },
       ),
     );
   }
+}
+
+/// Список сторон без фотоотчёта: GID, оператор, город и число показов.
+void _showMissingPhotoSides(
+  BuildContext context,
+  CampaignPhotoCoverage coverage,
+) {
+  final fmtNum = NumberFormat.decimalPattern('ru_RU');
+  final missing = coverage.missing;
+
+  showDialog<void>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      backgroundColor: Colors.white,
+      title: const Text(
+        'Экраны без фотоотчётов',
+        style: TextStyle(
+          color: kTextPrimary,
+          fontSize: 16,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+      content: SizedBox(
+        width: 620,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              '${missing.length} сторон, '
+              '${fmtNum.format(coverage.missingShows)} показов без '
+              'подтверждения фотоотчётом',
+              style: const TextStyle(color: kTextSecondary, fontSize: 12),
+            ),
+            const SizedBox(height: 12),
+            Flexible(
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    for (final side in missing)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        child: Row(
+                          children: [
+                            SizedBox(
+                              width: 150,
+                              child: Text(
+                                side.label,
+                                style: const TextStyle(
+                                  color: kTextPrimary,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            Expanded(
+                              child: Text(
+                                [
+                                  if (side.operatorName.isNotEmpty)
+                                    side.operatorName,
+                                  if (side.city.isNotEmpty) side.city,
+                                ].join(' · '),
+                                style: const TextStyle(
+                                  color: kTextSecondary,
+                                  fontSize: 12,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            Text(
+                              '${fmtNum.format(side.shows)} показов',
+                              style: const TextStyle(
+                                color: kTextSecondary,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          // Список нужен, чтобы отправить его оператору, — копируем целиком.
+          onPressed: () async {
+            await Clipboard.setData(
+              ClipboardData(
+                text: missing.map((side) => side.label).join('\n'),
+              ),
+            );
+            if (!dialogContext.mounted) return;
+            ScaffoldMessenger.of(dialogContext).showSnackBar(
+              const SnackBar(content: Text('GID скопированы')),
+            );
+          },
+          child: const Text('Скопировать GID'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(dialogContext),
+          style: FilledButton.styleFrom(backgroundColor: kAccent),
+          child: const Text('Закрыть'),
+        ),
+      ],
+    ),
+  );
 }
 
 // ── Plan / Fact card ──────────────────────────────────────────────────────────

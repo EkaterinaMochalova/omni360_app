@@ -14,8 +14,8 @@ import '../utils/campaign_notifications.dart';
 import '../utils/pace_alerts.dart';
 import '../widgets/app_sidebar.dart';
 import '../widgets/loading_placeholders.dart';
-import '../widgets/campaign_summary_panel.dart';
 import '../widgets/reorderable_flex_wrap.dart';
+import 'campaign_detail.dart';
 // Переходы в сервисный дашборд и бюджеты/темпы живут в AppSidebar.
 
 const _kCampaignsOrderKey = 'omni360-campaigns-order';
@@ -68,7 +68,6 @@ class _CampaignsScreenState extends ConsumerState<CampaignsScreen> {
   final Set<String> _sentNoticeKeys = {};
 
   List<String>? _customOrder;
-  Campaign? _panelCampaign;
 
   static const _notificationCheckInterval = Duration(minutes: 5);
 
@@ -618,83 +617,82 @@ class _CampaignsScreenState extends ConsumerState<CampaignsScreen> {
           ),
         ),
       ),
-      body: Stack(
-        children: [
-          campaigns.when(
-            loading: () =>
-                const Center(child: CircularProgressIndicator(color: kAccent)),
-            error: (e, _) => Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(
-                    Icons.error_outline,
-                    color: Colors.redAccent,
-                    size: 40,
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    e.toString(),
-                    style: const TextStyle(color: kTextSecondary),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 16),
-                  FilledButton(
-                    onPressed: () => ref.read(campaignsProvider.notifier).fetch(),
-                    style: FilledButton.styleFrom(backgroundColor: kAccent),
-                    child: const Text('Повторить'),
-                  ),
-                ],
+      body: campaigns.when(
+        loading: () =>
+            const Center(child: CircularProgressIndicator(color: kAccent)),
+        error: (e, _) => Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.error_outline,
+                color: Colors.redAccent,
+                size: 40,
               ),
-            ),
-            data: (all) {
-              final list = _apply(all);
-              return Column(
-                children: [
-                  // Stats bar
-                  _StatsBar(all: all, filtered: list, sort: _sort),
-                  // Grid
-                  Expanded(
-                    child: list.isEmpty
-                        ? const Center(
-                            child: Text(
-                              'Нет кампаний',
-                              style: TextStyle(
-                                color: kTextSecondary,
-                                fontSize: 15,
-                              ),
-                            ),
-                          )
-                        : RefreshIndicator(
-                            color: kAccent,
-                            onRefresh: () =>
-                                ref.read(campaignsProvider.notifier).fetch(),
-                            child: SingleChildScrollView(
-                              physics: const AlwaysScrollableScrollPhysics(),
-                              padding: const EdgeInsets.all(16),
-                              child: ReorderableFlexWrap<Campaign>(
-                                items: list,
-                                idOf: (c) => c.id,
-                                onReorder: _onReorder,
-                                itemBuilder: (context, c) => _CampaignCard(
-                                  campaign: c,
-                                  onTap: () =>
-                                      setState(() => _panelCampaign = c),
+              const SizedBox(height: 12),
+              Text(
+                e.toString(),
+                style: const TextStyle(color: kTextSecondary),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 16),
+              FilledButton(
+                onPressed: () => ref.read(campaignsProvider.notifier).fetch(),
+                style: FilledButton.styleFrom(backgroundColor: kAccent),
+                child: const Text('Повторить'),
+              ),
+            ],
+          ),
+        ),
+        data: (all) {
+          final list = _apply(all);
+          return Column(
+            children: [
+              // Stats bar
+              _StatsBar(all: all, filtered: list, sort: _sort),
+              // Grid
+              Expanded(
+                child: list.isEmpty
+                    ? const Center(
+                        child: Text(
+                          'Нет кампаний',
+                          style: TextStyle(
+                            color: kTextSecondary,
+                            fontSize: 15,
+                          ),
+                        ),
+                      )
+                    : RefreshIndicator(
+                        color: kAccent,
+                        onRefresh: () =>
+                            ref.read(campaignsProvider.notifier).fetch(),
+                        child: SingleChildScrollView(
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          padding: const EdgeInsets.all(16),
+                          child: ReorderableFlexWrap<Campaign>(
+                            items: list,
+                            idOf: (c) => c.id,
+                            onReorder: _onReorder,
+                            itemBuilder: (context, c) => _CampaignCard(
+                              campaign: c,
+                              // Клик открывает саму карточку. Промежуточная
+                              // панель-превью показывала те же цифры, что и
+                              // плитка, — лишний шаг на пути к данным.
+                              onTap: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) =>
+                                      CampaignDetailScreen(campaignId: c.id),
                                 ),
                               ),
                             ),
                           ),
-                  ),
-                ],
-              );
-            },
-          ),
-          if (_panelCampaign != null)
-            CampaignSummaryPanelOverlay(
-              campaign: _panelCampaign!,
-              onClose: () => setState(() => _panelCampaign = null),
-            ),
-        ],
+                        ),
+                      ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -900,6 +898,36 @@ class _FilterBar extends StatelessWidget {
 
 // ── Campaign card ─────────────────────────────────────────────────────────────
 
+/// Обёртка «по этому блоку можно щёлкнуть»: курсор-палец и подсветка при
+/// наведении. Без них плитка выглядела статичной вёрсткой, и то, что она
+/// ведёт в карточку кампании, приходилось угадывать.
+class _ClickableCard extends StatefulWidget {
+  final VoidCallback onTap;
+  final Widget Function(bool hovered) builder;
+
+  const _ClickableCard({required this.onTap, required this.builder});
+
+  @override
+  State<_ClickableCard> createState() => _ClickableCardState();
+}
+
+class _ClickableCardState extends State<_ClickableCard> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: widget.builder(_hovered),
+      ),
+    );
+  }
+}
+
 class _CampaignCard extends ConsumerWidget {
   final Campaign campaign;
   final VoidCallback onTap;
@@ -975,17 +1003,22 @@ class _CampaignCard extends ConsumerWidget {
           }()
         : null;
 
-    return GestureDetector(
+    return _ClickableCard(
       onTap: onTap,
-      child: Container(
+      builder: (hovered) => Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(14),
+          // Рамка есть всегда, просто прозрачная: если добавлять её только при
+          // наведении, карточка дёргается на пару пикселей под курсором.
+          border: Border.all(
+            color: hovered ? kAccent.withValues(alpha: 0.5) : Colors.transparent,
+          ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.04),
-              blurRadius: 8,
+              color: Colors.black.withValues(alpha: hovered ? 0.10 : 0.04),
+              blurRadius: hovered ? 14 : 8,
               offset: const Offset(0, 2),
             ),
           ],

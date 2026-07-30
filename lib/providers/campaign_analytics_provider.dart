@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:dio/dio.dart';
@@ -82,6 +83,11 @@ class CampaignAnalyticsState {
   /// сказать, а не показывать неполные цифры как полные.
   final bool allRecordsComplete;
 
+  /// Когда данные пришли с бэкенда. Нужна из-за кеша: вернувшись в карточку,
+  /// пользователь видит цифры, посчитанные раньше, и должен понимать, на какой
+  /// момент они посчитаны — иначе кеш выглядит как свежая загрузка.
+  final DateTime? loadedAt;
+
   const CampaignAnalyticsState({
     required this.impressions,
     required this.aggregate,
@@ -90,6 +96,7 @@ class CampaignAnalyticsState {
     required this.query,
     required this.allRecords,
     this.allRecordsComplete = true,
+    this.loadedAt,
   });
 
   factory CampaignAnalyticsState.initial() => CampaignAnalyticsState(
@@ -109,6 +116,7 @@ class CampaignAnalyticsState {
     CampaignAnalyticsQuery? query,
     AsyncValue<List<CampaignImpressionRecord>>? allRecords,
     bool? allRecordsComplete,
+    DateTime? loadedAt,
   }) {
     return CampaignAnalyticsState(
       impressions: impressions ?? this.impressions,
@@ -118,6 +126,7 @@ class CampaignAnalyticsState {
       query: query ?? this.query,
       allRecords: allRecords ?? this.allRecords,
       allRecordsComplete: allRecordsComplete ?? this.allRecordsComplete,
+      loadedAt: loadedAt ?? this.loadedAt,
     );
   }
 }
@@ -203,6 +212,7 @@ class CampaignAnalyticsController
             response.data as Map<String, dynamic>,
           ),
         ),
+        loadedAt: DateTime.now(),
       );
     } on DioException catch (e, st) {
       final serverDetails = _extractServerDetails(e);
@@ -224,6 +234,7 @@ class CampaignAnalyticsController
         aggregate: AsyncValue.data(result.aggregate),
         allRecords: AsyncValue.data(result.records),
         allRecordsComplete: result.complete,
+        loadedAt: DateTime.now(),
       );
     } on DioException catch (e, st) {
       final serverDetails = _extractServerDetails(e);
@@ -534,7 +545,46 @@ class CampaignAnalyticsController
   }
 }
 
+/// Сколько живёт загруженная аналитика после выхода из карточки кампании.
+///
+/// Раньше провайдер был чистым autoDispose: закрыл карточку — данные выбросили,
+/// вернулся — всё грузится с нуля, включая полную выгрузку показов на минуты.
+/// Хранится это в памяти вкладки, а не в кеше браузера: на диск ничего не
+/// пишется, при перезагрузке страницы кеш исчезает сам.
+const _analyticsCacheTtl = Duration(hours: 2);
+
+/// Сколько кампаний держим одновременно. Полная выгрузка — это десятки тысяч
+/// записей на кампанию, и держать их для всех открытых за сессию карточек
+/// значит бесконтрольно занимать память вкладки. Самая давняя кампания
+/// вытесняется: она всё равно ещё жива, пока открыта на экране, — снятие
+/// удержания лишь возвращает ей обычное поведение autoDispose.
+const _analyticsCacheLimit = 3;
+
+final _analyticsCacheOrder = <String>[];
+final _analyticsCacheLinks = <String, KeepAliveLink>{};
+
+void _rememberAnalyticsCache(String campaignId, KeepAliveLink link) {
+  _analyticsCacheLinks[campaignId] = link;
+  _analyticsCacheOrder
+    ..remove(campaignId)
+    ..add(campaignId);
+  while (_analyticsCacheOrder.length > _analyticsCacheLimit) {
+    final oldest = _analyticsCacheOrder.removeAt(0);
+    _analyticsCacheLinks.remove(oldest)?.close();
+  }
+}
+
 final campaignAnalyticsProvider = StateNotifierProvider.autoDispose
     .family<CampaignAnalyticsController, CampaignAnalyticsState, String>(
-      (ref, campaignId) => CampaignAnalyticsController(campaignId),
+      (ref, campaignId) {
+        final link = ref.keepAlive();
+        final expiry = Timer(_analyticsCacheTtl, link.close);
+        _rememberAnalyticsCache(campaignId, link);
+        ref.onDispose(() {
+          expiry.cancel();
+          _analyticsCacheOrder.remove(campaignId);
+          _analyticsCacheLinks.remove(campaignId);
+        });
+        return CampaignAnalyticsController(campaignId);
+      },
     );

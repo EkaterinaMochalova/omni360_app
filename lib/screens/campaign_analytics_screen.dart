@@ -98,7 +98,7 @@ void openDashboardSettings(
                 ),
               ),
               _DashboardToggleTile(
-                title: 'Причины проигрышей',
+                title: 'Причины отклонений',
                 value: state.prefs.showFailureBreakdown,
                 onChanged: (value) => controller.updatePrefs(
                   state.prefs.copyWith(showFailureBreakdown: value),
@@ -234,7 +234,7 @@ void openAnalyticsFilters(
                   ),
                   const SizedBox(height: 16),
                   const Text(
-                    'Причины проигрышей',
+                    'Причины отклонений',
                     style: TextStyle(
                       color: kTextPrimary,
                       fontWeight: FontWeight.w600,
@@ -359,7 +359,12 @@ class AnalyticsToolbar extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           Text(
-            'Период: ${dateFmt.format(state.query.start)} - ${dateFmt.format(state.query.end)}',
+            // Время расчёта — из-за кеша: вернувшись в карточку, пользователь
+            // видит уже посчитанные цифры, и должен понимать, на какой момент
+            // они посчитаны. Обновить — кнопкой справа.
+            'Период: ${dateFmt.format(state.query.start)} - '
+            '${dateFmt.format(state.query.end)}'
+            '${state.loadedAt == null ? '' : '  ·  данные на ${DateFormat('HH:mm').format(state.loadedAt!)}'}',
             style: const TextStyle(color: kTextSecondary, fontSize: 12),
           ),
         ],
@@ -383,8 +388,8 @@ const kAnalyticsBlockIds = [
 
 typedef DashboardBlock = ({String id, bool isWide, Widget child});
 
-/// Палитра для причин проигрышей — тёплые тона, чтобы раскрытая доля читалась
-/// как части проигрышей, а не как что-то новое.
+/// Палитра для причин отклонений — тёплые тона, чтобы раскрытая доля читалась
+/// как части отклонённых показов, а не как что-то новое.
 const _kFailurePalette = [
   Color(0xFFE53935),
   Color(0xFFF9A825),
@@ -394,8 +399,11 @@ const _kFailurePalette = [
   Color(0xFF6D4C41),
 ];
 
-/// Верхний уровень — успешные показы и проигрыши. Причины проигрышей вложены
-/// в проигрыши: по клику доля раскрывается на них.
+/// Верхний уровень — успешные и отклонённые показы. Причины отклонений вложены
+/// в отклонённые: по клику доля раскрывается на них.
+///
+/// «Проигрыш» — это только проигрыш в аукционе по ставке, одна из причин
+/// отклонения, поэтому все отклонения так называть нельзя.
 List<DonutSlice> _statusSlices(
   CampaignAnalyticsAggregate aggregate,
   CampaignAnalyticsState state,
@@ -415,7 +423,7 @@ List<DonutSlice> _statusSlices(
       color: const Color(0xFF2E7D32),
     ),
     DonutSlice(
-      label: 'Проигрыши',
+      label: 'Отклонённые показы',
       value: aggregate.losses,
       color: const Color(0xFFE53935),
       children: state.prefs.showFailureBreakdown
@@ -429,7 +437,7 @@ List<DonutSlice> _statusSlices(
             ]
           : const [],
     ),
-    // Запросы, не попавшие ни в победы, ни в проигрыши, иначе сумма долей не
+    // Запросы, не попавшие ни в успешные, ни в отклонённые, иначе сумма долей не
     // сходится с общим числом запросов.
     if (other > 0)
       DonutSlice(
@@ -470,8 +478,8 @@ Widget _requestsSummary(CampaignAnalyticsAggregate aggregate) {
       metric('Запросов', fmt.format(total)),
       metric('Успешные показы', fmt.format(aggregate.successes)),
       metric('% успешных', share(aggregate.successes)),
-      metric('Проигрыши', fmt.format(aggregate.losses)),
-      metric('% проигрышей', share(aggregate.losses)),
+      metric('Отклонённые показы', fmt.format(aggregate.losses)),
+      metric('% отклонённых', share(aggregate.losses)),
     ],
   );
 }
@@ -661,7 +669,7 @@ class _CampaignDashboardBodyState extends State<CampaignDashboardBody> {
     final records = page?.content ?? const <CampaignImpressionRecord>[];
     // Разбивки по статусам и причинам собирает _statusSlices — здесь они
     // больше не нужны отдельными списками.
-    // Победы/проигрыши/фильтр по экрану больше не нужны здесь: эти цифры
+    // Успешные/отклонённые/фильтр по экрану больше не нужны здесь: эти цифры
     // переехали в обзорный блок карточки кампании вместе со «Сводкой».
 
     // Блоки строятся всегда, в любом состоянии данных: раньше они исчезали из
@@ -674,14 +682,14 @@ class _CampaignDashboardBodyState extends State<CampaignDashboardBody> {
     final analyticsBlocks = <String, DashboardBlock>{
       // Блок «Сводка» переехал в обзорный блок карточки кампании — там те же
       // цифры стоят рядом со статусом и датами, а не отдельной плашкой.
-      // Статусы и причины проигрышей — один срез одних и тех же запросов,
+      // Статусы и причины отклонений — один срез одних и тех же запросов,
       // поэтому они на одной кольцевой диаграмме, а не в двух списках рядом.
       if (state.prefs.showStateBreakdown || state.prefs.showFailureBreakdown)
         'states': (
           id: 'states',
           isWide: true,
           child: CardSectionState(
-            title: 'Статусы и причины проигрышей',
+            title: 'Статусы и причины отклонений',
             error: state.aggregate.hasError
                 ? analyticsErrorMessage(state.aggregate.error!)
                 : null,
@@ -707,7 +715,8 @@ class _CampaignDashboardBodyState extends State<CampaignDashboardBody> {
           child: CardSectionState(
             title: 'Каждый запрос',
             subtitle:
-                'Победы, проигрыши и аукционные параметры по каждому request',
+                'Успешные и отклонённые показы, аукционные параметры по '
+                'каждому request',
             error: pageError,
             skeletonLines: 6,
             child: page == null
