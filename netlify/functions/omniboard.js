@@ -32,15 +32,36 @@ exports.handler = async (event) => {
       headers[key] = value;
     }
 
-    const response = await fetch(url, {
-      method: event.httpMethod,
-      headers,
-      body: ['GET', 'HEAD'].includes(event.httpMethod)
-          ? undefined
-          : event.isBase64Encoded
-              ? Buffer.from(event.body || '', 'base64')
-              : event.body,
-    });
+    const body = ['GET', 'HEAD'].includes(event.httpMethod)
+        ? undefined
+        : event.isBase64Encoded
+            ? Buffer.from(event.body || '', 'base64')
+            : event.body;
+
+    // Бэкенд иногда обрывает соединение на одном запросе из пачки, и тогда
+    // fetch падает ещё до ответа — клиент видел 502 «fetch failed». Повторяем
+    // только безопасные для повтора запросы (GET/HEAD) и только при сетевом
+    // сбое: ответ с кодом ошибки отдаём как есть, его повторит клиент.
+    const isRetryable = ['GET', 'HEAD'].includes(event.httpMethod);
+    const attempts = isRetryable ? 3 : 1;
+
+    let response;
+    let lastError;
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      try {
+        response = await fetch(url, {method: event.httpMethod, headers, body});
+        lastError = undefined;
+        break;
+      } catch (error) {
+        lastError = error;
+        if (attempt < attempts - 1) {
+          await new Promise((resolve) => setTimeout(resolve, 300 * (attempt + 1)));
+        }
+      }
+    }
+    if (lastError !== undefined) {
+      throw lastError;
+    }
 
     const contentType = response.headers.get('content-type');
     const responseBody = await response.arrayBuffer();

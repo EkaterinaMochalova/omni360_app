@@ -5,7 +5,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../main.dart';
 import '../models/campaign.dart';
+import '../models/pace_summary.dart';
 import '../providers/campaigns_provider.dart';
+import '../utils/broadcast_schedule.dart';
 import '../services/app_notifications_service.dart';
 import '../services/local_order_store.dart';
 import '../utils/campaign_notifications.dart';
@@ -936,6 +938,7 @@ class _CampaignCard extends ConsumerWidget {
         ? (effectiveSpent / c.budget!).clamp(0.0, 1.0)
         : null;
 
+
     // Алерты считаются от расписания, а в списочном ответе timeSettings нет:
     // без него кампания выглядела вещающей круглосуточно, и «Недотрата» с
     // «Нет выходов/час» загорались в часы, когда она законно молчит. Пока
@@ -944,6 +947,11 @@ class _CampaignCard extends ConsumerWidget {
     final schedule = c.isActive
         ? ref.watch(campaignScheduleProvider(c.id)).valueOrNull
         : null;
+
+    // Здоровье кампании — темп относительно плана на текущий момент, а не
+    // доля освоенного бюджета. Расчёт локальный: расписание уже подгружено
+    // для алертов, лишних запросов не добавляется.
+    final paceColor = _paceColor(c, effectiveSpent, cardStats, schedule);
 
     final alertDots = c.isActive && cardStats != null && schedule != null
         ? () {
@@ -1124,9 +1132,11 @@ class _CampaignCard extends ConsumerWidget {
                 child: LinearProgressIndicator(
                   value: ratio,
                   backgroundColor: const Color(0xFFE8EAF6),
-                  valueColor: AlwaysStoppedAnimation(
-                    ratio > 0.85 ? Colors.redAccent : kAccent,
-                  ),
+                  // Заполнение — доля освоенного бюджета, а цвет — темп
+                  // относительно плана на сейчас. Раньше цвет зависел от
+                  // самой доли, и 95% освоения к концу периода (то есть всё
+                  // хорошо) горело красным, а 35% (то есть плохо) — синим.
+                  valueColor: AlwaysStoppedAnimation(paceColor),
                   minHeight: 5,
                 ),
               ),
@@ -1192,6 +1202,32 @@ class _CampaignCard extends ConsumerWidget {
         ),
       ),
     );
+  }
+
+  /// Цвет шкалы по темпу освоения относительно плана на текущий момент.
+  /// Синий — темп посчитать не от чего (нет бюджета, дат или факта).
+  static Color _paceColor(
+    Campaign c,
+    double? spent,
+    CampaignStats? stats,
+    BroadcastSchedule? schedule,
+  ) {
+    if (spent == null || spent <= 0) return kAccent;
+
+    final pace = CampaignPaceSummary.fromCampaign(
+      c,
+      DateTime.now(),
+      spentOverride: spent,
+      budgetOverride: stats?.planBudget,
+      schedule: schedule,
+    );
+    if (pace.planToNow <= 0) return kAccent;
+
+    final ratio = pace.pacePctNow;
+    if (ratio > 1.1) return Colors.redAccent; // перерасход
+    if (ratio >= 0.9) return const Color(0xFF43A047); // по плану
+    if (ratio >= 0.7) return const Color(0xFFF9A825); // подотстаём
+    return Colors.redAccent; // сильно отстаём
   }
 
   static (Color, Color) _statusColors(String status) {

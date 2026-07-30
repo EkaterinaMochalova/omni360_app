@@ -15,7 +15,6 @@ import '../services/file_saver_stub.dart'
 import '../services/local_order_store.dart';
 import '../widgets/card_section.dart';
 import '../widgets/donut_breakdown.dart';
-import '../widgets/loading_placeholders.dart';
 import '../widgets/loss_report_sections.dart';
 import '../widgets/reorderable_flex_wrap.dart';
 
@@ -535,35 +534,17 @@ Widget _fromAllRecords(
               build(),
             ],
           ),
-    loading: () => CardSection(
+    // Скелет и ошибка — той же формы, что у остальных блоков.
+    loading: () => CardSectionState(
       title: title,
       subtitle: 'Считаем по всем показам за период',
-      // Строки-заглушки вместо крутилки: сразу видно, что здесь будет
-      // таблица, и что она именно грузится, а не пуста.
-      child: const Padding(
-        padding: EdgeInsets.symmetric(vertical: 4),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            ShimmerBox(width: 260, height: 12),
-            SizedBox(height: 10),
-            ShimmerBox(width: 200, height: 12),
-            SizedBox(height: 10),
-            ShimmerBox(width: 230, height: 12),
-          ],
-        ),
-      ),
+      skeletonLines: 4,
     ),
-    error: (e, _) => CardSection(
+    error: (e, _) => CardSectionState(
       title: title,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        child: Text(
+      error:
           'Не удалось загрузить полную выгрузку показов за период.\n'
           'Попробуйте сузить период — обычно помогает.',
-          style: const TextStyle(color: kTextSecondary, fontSize: 12),
-        ),
-      ),
     ),
   );
 }
@@ -692,11 +673,14 @@ class _CampaignDashboardBodyState extends State<CampaignDashboardBody> {
     // Победы/проигрыши/фильтр по экрану больше не нужны здесь: эти цифры
     // переехали в обзорный блок карточки кампании вместе со «Сводкой».
 
-    // Блоки аналитики добавляем только когда данные пришли: без них сетка
-    // всё равно покажет карточку кампании.
-    final analyticsBlocks = page == null
-        ? const <String, DashboardBlock>{}
-        : <String, DashboardBlock>{
+    // Блоки строятся всегда, в любом состоянии данных: раньше они исчезали из
+    // сетки до загрузки, раскладка прыгала, и было не понять, блок выключен
+    // или данных нет.
+    final pageError = state.impressions.hasError
+        ? analyticsErrorMessage(state.impressions.error!)
+        : null;
+
+    final analyticsBlocks = <String, DashboardBlock>{
       // Блок «Сводка» переехал в обзорный блок карточки кампании — там те же
       // цифры стоят рядом со статусом и датами, а не отдельной плашкой.
       // Статусы и причины проигрышей — один срез одних и тех же запросов,
@@ -705,67 +689,80 @@ class _CampaignDashboardBodyState extends State<CampaignDashboardBody> {
         'states': (
           id: 'states',
           isWide: true,
-          child: CardSection(
+          child: CardSectionState(
             title: 'Статусы и причины проигрышей',
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Сводка по запросам переехала сюда из обзорного блока: она о
-                // тех же запросах, что и диаграмма, и рядом с ней читается.
-                _requestsSummary(aggregate),
-                const Divider(height: 20, color: kBorder),
-                DonutBreakdown(slices: _statusSlices(aggregate, state)),
-              ],
-            ),
+            error: state.aggregate.hasError
+                ? analyticsErrorMessage(state.aggregate.error!)
+                : null,
+            skeletonLines: 5,
+            child: state.aggregate.hasValue
+                ? Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Сводка по запросам переехала сюда из обзорного блока:
+                      // она о тех же запросах, что и диаграмма.
+                      _requestsSummary(aggregate),
+                      const Divider(height: 20, color: kBorder),
+                      DonutBreakdown(slices: _statusSlices(aggregate, state)),
+                    ],
+                  )
+                : null,
           ),
         ),
       if (state.prefs.showRequestTable)
         'requests': (
           id: 'requests',
           isWide: false,
-          child: CardSection(
+          child: CardSectionState(
             title: 'Каждый запрос',
             subtitle:
                 'Победы, проигрыши и аукционные параметры по каждому request',
-            child: records.isEmpty
-                ? const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 8),
-                    child: Text(
-                      'По выбранным фильтрам запросов не найдено.',
-                      style: TextStyle(color: kTextSecondary),
-                    ),
-                  )
-                : Column(
-                    children: [
-                      ...records.map((record) => _RequestRow(record: record)),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          OutlinedButton(
-                            onPressed: page.page > 0
-                                ? () => onPageChange(page.page - 1)
-                                : null,
-                            child: const Text('Назад'),
+            error: pageError,
+            skeletonLines: 6,
+            child: page == null
+                ? null
+                : (records.isEmpty
+                      ? const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 8),
+                          child: Text(
+                            'По выбранным фильтрам запросов не найдено.',
+                            style: TextStyle(color: kTextSecondary),
                           ),
-                          const Spacer(),
-                          Text(
-                            'Страница ${page.page + 1} из ${page.totalPages}',
-                            style: const TextStyle(
-                              color: kTextSecondary,
-                              fontSize: 12,
+                        )
+                      : Column(
+                          children: [
+                            ...records.map(
+                              (record) => _RequestRow(record: record),
                             ),
-                          ),
-                          const Spacer(),
-                          OutlinedButton(
-                            onPressed: !page.last
-                                ? () => onPageChange(page.page + 1)
-                                : null,
-                            child: const Text('Вперёд'),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
+                            const SizedBox(height: 8),
+                            Row(
+                              children: [
+                                OutlinedButton(
+                                  onPressed: page.page > 0
+                                      ? () => onPageChange(page.page - 1)
+                                      : null,
+                                  child: const Text('Назад'),
+                                ),
+                                const Spacer(),
+                                Text(
+                                  'Страница ${page.page + 1} из '
+                                  '${page.totalPages}',
+                                  style: const TextStyle(
+                                    color: kTextSecondary,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                                const Spacer(),
+                                OutlinedButton(
+                                  onPressed: !page.last
+                                      ? () => onPageChange(page.page + 1)
+                                      : null,
+                                  child: const Text('Вперёд'),
+                                ),
+                              ],
+                            ),
+                          ],
+                        )),
           ),
         ),
       // Три блока ниже строятся из полной выгрузки всех показов — она грузится

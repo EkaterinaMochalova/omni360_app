@@ -372,7 +372,12 @@ class CampaignAnalyticsController
     DioException? lastError;
 
     for (final params in attempts) {
-      for (var attempt = 0; attempt < 2; attempt++) {
+      // Три попытки на 502/503/504 с растущей паузой: прокси отдаёт 502, когда
+      // бэкенд обрывает соединение, и одного повтора не хватало. Это не тот
+      // случай, что с таймаутами: 502 — уже завершённый ответ, так что
+      // висящих запросов повтор не добавляет.
+      const maxAttempts = 3;
+      for (var attempt = 0; attempt < maxAttempts; attempt++) {
         try {
           return await _client.dio.get(
             '/api/v1.0/clients/campaigns/$campaignId/impressions',
@@ -383,16 +388,15 @@ class CampaignAnalyticsController
           lastError = e;
           final status = e.response?.statusCode ?? 0;
           final isRetryableStatus = status == 502 || status == 503 || status == 504;
-          if (isRetryableStatus && attempt == 0) {
-            // Временный сбой прокси/бэкенда — не в формате параметров дело,
-            // даём один шанс на повтор прежде чем переходить к следующему
-            // варианту (как уже сделано для этого же эндпоинта в
-            // service_dashboard_provider.dart). Таймауты НЕ ретраим здесь —
-            // при и так перегруженном бэкенде повтор на каждый подвисший
-            // запрос удваивает нагрузку (а _fetchAllRecords и так шлёт
-            // страницы пачками по 6 параллельно), что превращает редкие
-            // подвисания в стабильный затык для всех кампаний.
-            await Future<void>.delayed(const Duration(milliseconds: 250));
+          if (isRetryableStatus && attempt < maxAttempts - 1) {
+            // Временный сбой прокси/бэкенда — не в формате параметров дело.
+            // Таймауты НЕ ретраим здесь — при и так перегруженном бэкенде
+            // повтор на каждый подвисший запрос удваивает нагрузку (а
+            // _fetchAllRecords и так шлёт страницы пачками по 6 параллельно),
+            // что превращает редкие подвисания в стабильный затык.
+            await Future<void>.delayed(
+              Duration(milliseconds: 300 * (attempt + 1)),
+            );
             continue;
           }
           if (status == 400) {
