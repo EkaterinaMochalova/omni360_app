@@ -858,6 +858,33 @@ class _PlanFactRow extends StatelessWidget {
   }
 }
 
+/// Обзор кампании: статус, даты и фотоотчёты в одном блоке. По отдельности
+/// это были три карточки в одну-две строки каждая.
+class _OverviewCard extends StatelessWidget {
+  final Campaign campaign;
+  final AsyncValue<CampaignPhotoCoverage> coverage;
+
+  const _OverviewCard({required this.campaign, required this.coverage});
+
+  @override
+  Widget build(BuildContext context) {
+    // Сводка по запросам живёт в блоке с диаграммой — там она о том же, о чём
+    // диаграмма, и не отрывает цифры от разбивки.
+    return _Card(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _StatusCard(campaign: campaign, bare: true),
+          const SizedBox(height: 10),
+          _DatesCard(campaign: campaign, bare: true),
+          const SizedBox(height: 10),
+          _PhotoCoverageCard(coverage: coverage, bare: true),
+        ],
+      ),
+    );
+  }
+}
+
 /// Полоса предупреждений о темпе в шапке дашборда.
 ///
 /// Расписание берётся из самой кампании — детальный ответ его содержит, так
