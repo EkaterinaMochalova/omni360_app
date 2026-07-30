@@ -478,62 +478,19 @@ Widget _requestsSummary(CampaignAnalyticsAggregate aggregate) {
 
 /// Блок, который зависит от полной выгрузки показов: пока она грузится или
 /// если она отвалилась, показываем состояние вместо пустой таблицы.
+/// [build] получает плашку о неполной выгрузке и сам вставляет её внутрь своей
+/// карточки. Раньше плашка была отдельным соседом сверху: она выпадала из
+/// рамки блока, добавляла ему высоту и ломала заданный пользователем размер.
 Widget _fromAllRecords(
   AsyncValue<List<CampaignImpressionRecord>> records,
   String title,
-  Widget Function() build, {
+  Widget Function(Widget? notice) build, {
   bool complete = true,
   VoidCallback? onLoadAll,
 }) {
   return records.when(
-    data: (loaded) => complete
-        ? build()
-        : Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // Неполная выгрузка раньше показывалась как полная — цифры
-              // выглядели достоверными, хотя часть показов не доехала.
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 6,
-                ),
-                margin: const EdgeInsets.only(bottom: 10),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFFFF3E0),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        'Выгрузка неполная: посчитано по ${loaded.length} '
-                        'показам.',
-                        style: const TextStyle(
-                          color: Color(0xFFE65100),
-                          fontSize: 11,
-                        ),
-                      ),
-                    ),
-                    if (onLoadAll != null)
-                      TextButton(
-                        onPressed: onLoadAll,
-                        style: TextButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(horizontal: 8),
-                          minimumSize: const Size(0, 28),
-                          foregroundColor: const Color(0xFFE65100),
-                        ),
-                        child: const Text(
-                          'Загрузить весь период',
-                          style: TextStyle(fontSize: 11),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-              build(),
-            ],
-          ),
+    data: (loaded) =>
+        build(complete ? null : _partialNotice(loaded.length, onLoadAll)),
     // Скелет и ошибка — той же формы, что у остальных блоков.
     loading: () => CardSectionState(
       title: title,
@@ -545,6 +502,40 @@ Widget _fromAllRecords(
       error:
           'Не удалось загрузить полную выгрузку показов за период.\n'
           'Попробуйте сузить период — обычно помогает.',
+    ),
+  );
+}
+
+/// Плашка о том, что отчёт посчитан по неполной выгрузке.
+Widget _partialNotice(int loadedCount, VoidCallback? onLoadAll) {
+  return Container(
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+    decoration: BoxDecoration(
+      color: const Color(0xFFFFF3E0),
+      borderRadius: BorderRadius.circular(8),
+    ),
+    child: Row(
+      children: [
+        Expanded(
+          child: Text(
+            'Выгрузка неполная: посчитано по $loadedCount показам.',
+            style: const TextStyle(color: Color(0xFFE65100), fontSize: 11),
+          ),
+        ),
+        if (onLoadAll != null)
+          TextButton(
+            onPressed: onLoadAll,
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              minimumSize: const Size(0, 28),
+              foregroundColor: const Color(0xFFE65100),
+            ),
+            child: const Text(
+              'Загрузить весь период',
+              style: TextStyle(fontSize: 11),
+            ),
+          ),
+      ],
     ),
   );
 }
@@ -775,7 +766,10 @@ class _CampaignDashboardBodyState extends State<CampaignDashboardBody> {
           child: _fromAllRecords(
             state.allRecords,
             'Сводная по дням',
-            () => DailyBreakdownSection(rows: lossReport.dailyBreakdown),
+            (notice) => DailyBreakdownSection(
+              rows: lossReport.dailyBreakdown,
+              notice: notice,
+            ),
             complete: state.allRecordsComplete,
             onLoadAll: widget.onLoadAllRecords,
           ),
@@ -787,7 +781,10 @@ class _CampaignDashboardBodyState extends State<CampaignDashboardBody> {
           child: _fromAllRecords(
             state.allRecords,
             'Поднять ставки',
-            () => BidRaiseReportSection(rows: lossReport.bidRaiseRows),
+            (notice) => BidRaiseReportSection(
+              rows: lossReport.bidRaiseRows,
+              notice: notice,
+            ),
             complete: state.allRecordsComplete,
             onLoadAll: widget.onLoadAllRecords,
           ),
@@ -799,8 +796,9 @@ class _CampaignDashboardBodyState extends State<CampaignDashboardBody> {
           child: _fromAllRecords(
             state.allRecords,
             'К оператору',
-            () => OperatorIssueReportSection(
+            (notice) => OperatorIssueReportSection(
               groups: lossReport.operatorIssueGroups,
+              notice: notice,
             ),
             complete: state.allRecordsComplete,
             onLoadAll: widget.onLoadAllRecords,

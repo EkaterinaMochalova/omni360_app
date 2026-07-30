@@ -79,11 +79,19 @@ class CardSection extends StatelessWidget {
   final String? subtitle;
   final Widget child;
 
+  /// Плашка над содержимым (например о неполной выгрузке).
+  ///
+  /// Идёт внутри карточки и внутри прокручиваемой части, а не отдельным
+  /// соседом сверху: снаружи она выпадала из рамки блока и добавляла ему
+  /// высоту, ломая заданный пользователем размер и наезжая на соседей.
+  final Widget? notice;
+
   const CardSection({
     super.key,
     required this.title,
     this.subtitle,
     required this.child,
+    this.notice,
   });
 
   @override
@@ -125,10 +133,23 @@ class CardSection extends StatelessWidget {
             const SizedBox(height: 12),
           ];
 
+          // Плашка едет вместе с содержимым, а не в шапке: в шапке она
+          // отнимала бы часть заданной высоты у самих данных.
+          final body = notice == null
+              ? child
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    notice!,
+                    const SizedBox(height: 10),
+                    child,
+                  ],
+                );
+
           if (!constraints.hasBoundedHeight) {
             return Column(
               crossAxisAlignment: CrossAxisAlignment.start,
-              children: [...header, child],
+              children: [...header, body],
             );
           }
 
@@ -139,7 +160,7 @@ class CardSection extends StatelessWidget {
               ...header,
               // Заголовок остаётся на месте, прокручивается только содержимое.
               Flexible(
-                child: SingleChildScrollView(child: child),
+                child: SingleChildScrollView(child: body),
               ),
             ],
           );

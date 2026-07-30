@@ -20,13 +20,19 @@ String _pct(double value) => '${value.toStringAsFixed(1)}%';
 class DailyBreakdownSection extends StatelessWidget {
   final List<DailyBreakdownRow> rows;
 
-  const DailyBreakdownSection({super.key, required this.rows});
+  /// Плашка над содержимым — например о неполной выгрузке. Живёт внутри
+  /// карточки и внутри прокручиваемой части, поэтому не меняет заданную
+  /// пользователем высоту блока.
+  final Widget? notice;
+
+  const DailyBreakdownSection({super.key, required this.rows, this.notice});
 
   @override
   Widget build(BuildContext context) {
     return CardSection(
       title: 'Сводная по дням',
       subtitle: 'Итог за день, разбивка по оператору/городу — по клику',
+      notice: notice,
       child: rows.isEmpty
           ? const Padding(
               padding: EdgeInsets.symmetric(vertical: 8),
@@ -143,14 +149,16 @@ class _CountBadge extends StatelessWidget {
 /// рекламную поверхность (GID/адрес/сторона).
 class BidRaiseReportSection extends StatelessWidget {
   final List<BidRaiseRow> rows;
+  final Widget? notice;
 
-  const BidRaiseReportSection({super.key, required this.rows});
+  const BidRaiseReportSection({super.key, required this.rows, this.notice});
 
   @override
   Widget build(BuildContext context) {
     return CardSection(
       title: 'Поднять ставки',
       subtitle: 'Проигрыши в аукционе из-за ставки ниже минимальной',
+      notice: notice,
       child: rows.isEmpty
           ? const Padding(
               padding: EdgeInsets.symmetric(vertical: 8),
@@ -235,8 +243,13 @@ class BidRaiseReportSection extends StatelessWidget {
 /// сводка + полный список затронутых поверхностей внутри каждой группы.
 class OperatorIssueReportSection extends StatelessWidget {
   final List<OperatorIssueGroupRow> groups;
+  final Widget? notice;
 
-  const OperatorIssueReportSection({super.key, required this.groups});
+  const OperatorIssueReportSection({
+    super.key,
+    required this.groups,
+    this.notice,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -244,6 +257,7 @@ class OperatorIssueReportSection extends StatelessWidget {
       title: 'К оператору',
       subtitle:
           'Показ не подтверждён SSP/плеером, неизвестная причина и т.п. — с полным списком GID',
+      notice: notice,
       child: groups.isEmpty
           ? const Padding(
               padding: EdgeInsets.symmetric(vertical: 8),
