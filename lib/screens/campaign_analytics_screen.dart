@@ -384,15 +384,8 @@ const kAnalyticsBlockIds = [
 
 typedef DashboardBlock = ({String id, bool isWide, Widget child});
 
-// Две разные палитры: на одной диаграмме лежат статусы и причины проигрышей,
-// и по цвету должно быть видно, к какой группе относится доля.
-const _kStatePalette = [
-  Color(0xFF2E7D32),
-  Color(0xFF1565C0),
-  Color(0xFF00897B),
-  Color(0xFF5E35B1),
-  Color(0xFF00ACC1),
-];
+/// Палитра для причин проигрышей — тёплые тона, чтобы раскрытая доля читалась
+/// как части проигрышей, а не как что-то новое.
 const _kFailurePalette = [
   Color(0xFFE53935),
   Color(0xFFF9A825),
@@ -402,22 +395,86 @@ const _kFailurePalette = [
   Color(0xFF6D4C41),
 ];
 
-List<DonutSlice> _slicesOf(
-  Map<String, int> counts,
-  String group,
-  List<Color> palette,
+/// Верхний уровень — успешные показы и проигрыши. Причины проигрышей вложены
+/// в проигрыши: по клику доля раскрывается на них.
+List<DonutSlice> _statusSlices(
+  CampaignAnalyticsAggregate aggregate,
+  CampaignAnalyticsState state,
 ) {
-  final entries = counts.entries.where((e) => e.value > 0).toList()
+  final failures = aggregate.failureCounts.entries
+      .where((e) => e.value > 0)
+      .toList()
     ..sort((a, b) => b.value.compareTo(a.value));
+
+  final other =
+      aggregate.totalRequests - aggregate.successes - aggregate.losses;
+
   return [
-    for (var i = 0; i < entries.length; i++)
+    DonutSlice(
+      label: 'Успешные показы',
+      value: aggregate.successes,
+      color: const Color(0xFF2E7D32),
+    ),
+    DonutSlice(
+      label: 'Проигрыши',
+      value: aggregate.losses,
+      color: const Color(0xFFE53935),
+      children: state.prefs.showFailureBreakdown
+          ? [
+              for (var i = 0; i < failures.length; i++)
+                DonutSlice(
+                  label: failures[i].key,
+                  value: failures[i].value,
+                  color: _kFailurePalette[i % _kFailurePalette.length],
+                ),
+            ]
+          : const [],
+    ),
+    // Запросы, не попавшие ни в победы, ни в проигрыши, иначе сумма долей не
+    // сходится с общим числом запросов.
+    if (other > 0)
       DonutSlice(
-        label: entries[i].key,
-        value: entries[i].value,
-        color: palette[i % palette.length],
-        group: group,
+        label: 'Прочие статусы',
+        value: other,
+        color: const Color(0xFF90A4AE),
       ),
   ];
+}
+
+/// Сводка по запросам — та, что раньше стояла отдельной плашкой «Сводка».
+Widget _requestsSummary(CampaignAnalyticsAggregate aggregate) {
+  final fmt = NumberFormat.decimalPattern('ru_RU');
+  final total = aggregate.totalRequests;
+
+  Widget metric(String label, String value) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(label, style: const TextStyle(color: kTextSecondary, fontSize: 11)),
+      Text(
+        value,
+        style: const TextStyle(
+          color: kTextPrimary,
+          fontSize: 15,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+    ],
+  );
+
+  String share(int part) =>
+      total == 0 ? '—' : '${(part / total * 100).toStringAsFixed(1)}%';
+
+  return Wrap(
+    spacing: 18,
+    runSpacing: 8,
+    children: [
+      metric('Запросов', fmt.format(total)),
+      metric('Успешные показы', fmt.format(aggregate.successes)),
+      metric('% успешных', share(aggregate.successes)),
+      metric('Проигрыши', fmt.format(aggregate.losses)),
+      metric('% проигрышей', share(aggregate.losses)),
+    ],
+  );
 }
 
 /// Блок, который зависит от полной выгрузки показов: пока она грузится или
@@ -606,8 +663,8 @@ class _CampaignDashboardBodyState extends State<CampaignDashboardBody> {
     final onPageChange = widget.onPageChange;
 
     final records = page?.content ?? const <CampaignImpressionRecord>[];
-    final stateCounts = aggregate.stateCounts;
-    final failureCounts = aggregate.failureCounts;
+    // Разбивки по статусам и причинам собирает _statusSlices — здесь они
+    // больше не нужны отдельными списками.
     // Победы/проигрыши/фильтр по экрану больше не нужны здесь: эти цифры
     // переехали в обзорный блок карточки кампании вместе со «Сводкой».
 
@@ -626,17 +683,14 @@ class _CampaignDashboardBodyState extends State<CampaignDashboardBody> {
           isWide: true,
           child: CardSection(
             title: 'Статусы и причины проигрышей',
-            subtitle: 'Всего запросов: ${aggregate.totalRequests}',
-            child: DonutBreakdown(
-              slices: [
-                if (state.prefs.showStateBreakdown)
-                  ..._slicesOf(stateCounts, 'Статусы', _kStatePalette),
-                if (state.prefs.showFailureBreakdown)
-                  ..._slicesOf(
-                    failureCounts,
-                    'Причины проигрышей',
-                    _kFailurePalette,
-                  ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Сводка по запросам переехала сюда из обзорного блока: она о
+                // тех же запросах, что и диаграмма, и рядом с ней читается.
+                _requestsSummary(aggregate),
+                const Divider(height: 20, color: kBorder),
+                DonutBreakdown(slices: _statusSlices(aggregate, state)),
               ],
             ),
           ),

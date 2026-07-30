@@ -18,7 +18,6 @@ const _kDetailBlockIds = [
   'overview',
   'planFact',
   'limits',
-  'detailed',
   'chart',
 ];
 
@@ -204,12 +203,10 @@ class _CampaignDetailScreenState extends ConsumerState<CampaignDetailScreen> {
             // блок: по отдельности это четыре почти пустые карточки.
             'overview': (
               id: 'overview',
-              isWide: true,
+              isWide: false,
               child: _OverviewCard(
                 campaign: campaign,
                 coverage: photoCoverage,
-                aggregate: analytics.aggregate.valueOrNull,
-                aggregateLoading: analytics.aggregate.isLoading,
               ),
             ),
             'planFact': (
@@ -228,15 +225,8 @@ class _CampaignDetailScreenState extends ConsumerState<CampaignDetailScreen> {
                 stats: stats.asData?.value,
               ),
             ),
-            'detailed': (
-              id: 'detailed',
-              isWide: true,
-              child: stats.maybeWhen(
-                data: (s) => _DetailedStatsCard(campaign: campaign, stats: s),
-                orElse: () =>
-                    _DetailedStatsCard(campaign: campaign, stats: null),
-              ),
-            ),
+            // Блок «Подробная статистика» схлопнут в «План / Факт»: они
+            // показывали одни и те же метрики, но только там есть шкалы.
             if (stats.maybeWhen(
               data: (s) => s.daily.isNotEmpty,
               orElse: () => false,
@@ -276,6 +266,12 @@ class _CampaignDetailScreenState extends ConsumerState<CampaignDetailScreen> {
                         analyticsController.setRange(range.$1, range.$2);
                       },
                 onRefresh: analyticsController.fetchImpressions,
+              ),
+              // Предупреждения о темпе — здесь, рядом с выбором периода:
+              // в карточке «План / Факт» их замечали только после прокрутки.
+              _PaceAlertsBar(
+                campaign: campaign,
+                stats: stats.valueOrNull,
               ),
               // Пока что-то грузится, это должно быть видно: без полоски и
               // подписи недогруженный дашборд выглядит просто пустым.
@@ -631,19 +627,44 @@ class _PlanFactCard extends StatelessWidget {
       );
     }
 
+    // Бюджет в час и CPM переехали сюда из второй карточки подробной
+    // статистики: две почти одинаковые карточки схлопнуты в одну, и осталась
+    // та, где у каждой метрики есть шкала выполнения.
+    if (s != null && (s.hourlyBudgetPlan > 0 || s.hourlyBudgetFact > 0)) {
+      rows.add(
+        _PlanFactRow(
+          label: 'Бюджет в час',
+          plan: s.hourlyBudgetPlan > 0 ? fmtRub.format(s.hourlyBudgetPlan) : '—',
+          fact: s.hourlyBudgetFact > 0
+              ? fmtRub.format(s.hourlyBudgetFact)
+              : null,
+          ratio: (s.hourlyBudgetPlan > 0 && s.hourlyBudgetFact > 0)
+              ? s.hourlyBudgetFact / s.hourlyBudgetPlan
+              : null,
+        ),
+      );
+    }
+
+    // У CPM нет плана — показываем как факт без шкалы.
+    if (s != null && s.cpm > 0) {
+      rows.add(
+        _PlanFactRow(
+          label: 'CPM',
+          plan: '—',
+          fact: fmtRub.format(s.cpm),
+          ratio: null,
+        ),
+      );
+    }
+
     if (rows.isEmpty) return const SizedBox.shrink();
 
-    // Алерты темпа расхода
-    final alerts = s != null ? buildAlerts(campaign, s) : <PaceAlert>[];
-
+    // Плашки-предупреждения переехали в шапку страницы, рядом с выбором
+    // периода: там они видны сразу, а не только когда доскроллишь до карточки.
     return _Card(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (alerts.isNotEmpty) ...[
-            ...alerts.map((a) => _AlertBanner(alert: a)),
-            const SizedBox(height: 10),
-          ],
           // Header
           Row(
             children: [
@@ -967,18 +988,13 @@ class _DetailedStatsCard extends StatelessWidget {
 class _OverviewCard extends StatelessWidget {
   final Campaign campaign;
   final AsyncValue<CampaignPhotoCoverage> coverage;
-  final CampaignAnalyticsAggregate? aggregate;
-  final bool aggregateLoading;
 
-  const _OverviewCard({
-    required this.campaign,
-    required this.coverage,
-    required this.aggregate,
-    required this.aggregateLoading,
-  });
+  const _OverviewCard({required this.campaign, required this.coverage});
 
   @override
   Widget build(BuildContext context) {
+    // Сводка по запросам переехала в блок с диаграммой — там она о том же, о
+    // чём диаграмма, и не отрывает цифры от разбивки.
     return _Card(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -988,83 +1004,40 @@ class _OverviewCard extends StatelessWidget {
           _DatesCard(campaign: campaign, bare: true),
           const SizedBox(height: 10),
           _PhotoCoverageCard(coverage: coverage, bare: true),
-          const Divider(height: 22, color: kBorder),
-          _requestsSummary(),
         ],
       ),
     );
   }
 
-  Widget _requestsSummary() {
-    final data = aggregate;
-    if (data == null || data.totalRequests == 0) {
-      if (!aggregateLoading) {
-        return const Text(
-          'Нет запросов за выбранный период.',
-          style: TextStyle(color: kTextSecondary, fontSize: 12),
-        );
-      }
-      // Заглушки на месте будущих цифр — понятнее, чем строка текста.
-      return Wrap(
-        spacing: 18,
-        runSpacing: 8,
-        children: [
-          for (final label in const [
-            'Запросов',
-            'Успешные показы',
-            '% успешных',
-            'Проигрыши',
-            '% проигрышей',
-          ])
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  label,
-                  style: const TextStyle(color: kTextSecondary, fontSize: 11),
-                ),
-                const SizedBox(height: 3),
-                const ShimmerBox(width: 56, height: 15),
-              ],
-            ),
-        ],
-      );
-    }
+}
 
-    final fmt = NumberFormat.decimalPattern('ru_RU');
-    final successRate = data.successes / data.totalRequests * 100;
-    final lossRate = data.losses / data.totalRequests * 100;
+/// Полоса предупреждений о темпе в шапке дашборда.
+///
+/// Расписание берётся из самой кампании — детальный ответ его содержит, так
+/// что лишнего запроса здесь нет.
+class _PaceAlertsBar extends StatelessWidget {
+  final Campaign campaign;
+  final CampaignStats? stats;
 
-    return Wrap(
-      spacing: 18,
-      runSpacing: 8,
-      children: [
-        _metric('Запросов', fmt.format(data.totalRequests)),
-        _metric('Успешные показы', fmt.format(data.successes)),
-        _metric('% успешных', '${successRate.toStringAsFixed(1)}%'),
-        _metric('Проигрыши', fmt.format(data.losses)),
-        _metric('% проигрышей', '${lossRate.toStringAsFixed(1)}%'),
-      ],
-    );
-  }
+  const _PaceAlertsBar({required this.campaign, required this.stats});
 
-  Widget _metric(String label, String value) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: const TextStyle(color: kTextSecondary, fontSize: 11),
-        ),
-        Text(
-          value,
-          style: const TextStyle(
-            color: kTextPrimary,
-            fontSize: 15,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-      ],
+  @override
+  Widget build(BuildContext context) {
+    final s = stats;
+    if (s == null) return const SizedBox.shrink();
+
+    final alerts = buildAlerts(campaign, s);
+    if (alerts.isEmpty) return const SizedBox.shrink();
+
+    return Container(
+      width: double.infinity,
+      color: Colors.white,
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 6,
+        children: alerts.map((a) => _AlertBanner(alert: a)).toList(),
+      ),
     );
   }
 }
@@ -1443,18 +1416,20 @@ class _AlertBanner extends StatelessWidget {
               '${isOver ? 'выше' : 'ниже'} ожидаемого темпа';
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 6),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
         color: bg,
         borderRadius: BorderRadius.circular(10),
         border: Border.all(color: color.withValues(alpha: 0.3)),
       ),
+      // Плашка сама подбирает ширину по тексту: она живёт в Wrap в шапке, а
+      // Expanded внутри Row там упал бы на неограниченной ширине.
       child: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
           Text(icon, style: const TextStyle(fontSize: 14)),
           const SizedBox(width: 8),
-          Expanded(
+          Flexible(
             child: Text(
               text,
               style: TextStyle(
