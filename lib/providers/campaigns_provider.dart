@@ -197,23 +197,24 @@ final campaignStatsProvider = FutureProvider.family<CampaignStats, String>((
 ///
 /// Нужна, чтобы по проценту покрытия можно было сразу перейти к делу: кому из
 /// операторов и по каким экранам писать. Раньше видно было только сам процент.
+///
+/// Полей GID, адреса, оператора и города в ответе `impression-inventory-stats`
+/// нет вообще: там про поверхность известны только `inventory.id` и внутреннее
+/// имя вида `Estetika_5th_Saratov_Sokolovaya/Tankistov`. Поэтому здесь лежит
+/// только [inventoryId] — ключ, по которому подписи берутся из выгрузки
+/// показов, где есть и GID, и адрес, и оператор.
 class PhotoMissingSide {
-  final String gid;
-  final String side;
-  final String operatorName;
-  final String city;
+  final int? inventoryId;
+
+  /// Внутреннее имя поверхности — то, что реально отдаёт этот эндпоинт.
+  final String name;
   final int shows;
 
   const PhotoMissingSide({
-    required this.gid,
-    required this.side,
-    required this.operatorName,
-    required this.city,
+    required this.inventoryId,
+    required this.name,
     required this.shows,
   });
-
-  /// GID со стороной, если сторона известна отдельным полем.
-  String get label => side.isEmpty ? gid : '$gid $side';
 }
 
 class CampaignPhotoCoverage {
@@ -321,35 +322,6 @@ final campaignPhotoCoverageProvider =
         return showed > 0 || budget > 0;
       }
 
-      // Имя оператора/города бэкенд отдаёт то строкой, то вложенным объектом, и
-      // ключ в этом ответе заранее не известен — перебираем варианты, а не
-      // жёстко один. Пустая строка вместо срыва: список GID полезен и без
-      // оператора.
-      String? nameOf(dynamic node) {
-        if (node is String) return node.trim().isEmpty ? null : node.trim();
-        if (node is Map) {
-          final name = node['name'] ?? node['title'] ?? node['shortName'];
-          final text = name?.toString().trim();
-          if (text != null && text.isNotEmpty) return text;
-        }
-        return null;
-      }
-
-      String pickName(Map<String, dynamic> row, List<String> keys) {
-        for (final key in keys) {
-          final value = nameOf(row[key]);
-          if (value != null) return value;
-        }
-        final inventory = row['inventory'];
-        if (inventory is Map) {
-          for (final key in keys) {
-            final value = nameOf(inventory[key]);
-            if (value != null) return value;
-          }
-        }
-        return '';
-      }
-
       final sidesWithShows = <String>{};
       final withPhotoKeys = <String>{};
       final sideInfo = <String, PhotoMissingSide>{};
@@ -360,23 +332,13 @@ final campaignPhotoCoverageProvider =
         sidesWithShows.add(sideKey);
 
         final inventory = row['inventory'];
-        final gid =
-            (inventory is Map ? inventory['name']?.toString() : null) ??
-            row['inventoryGid']?.toString() ??
-            sideKey;
         final shows = (row['totalShowed'] as num?)?.toInt() ?? 0;
         final known = sideInfo[sideKey];
         sideInfo[sideKey] = PhotoMissingSide(
-          gid: gid,
-          side: row['side']?.toString() ?? '',
-          operatorName: pickName(row, const [
-            'displayOwnerDTO',
-            'displayOwner',
-            'displayOwnerName',
-            'operator',
-            'owner',
-          ]),
-          city: pickName(row, const ['city', 'cityName', 'cityDTO']),
+          inventoryId: inventory is Map
+              ? (inventory['id'] as num?)?.toInt()
+              : null,
+          name: (inventory is Map ? inventory['name']?.toString() : null) ?? '',
           // Одна сторона может прийти несколькими строками (разные креативы,
           // дни) — показы складываем.
           shows: (known?.shows ?? 0) + shows,
@@ -397,16 +359,6 @@ final campaignPhotoCoverageProvider =
               .whereType<PhotoMissingSide>()
               .toList()
             ..sort((a, b) => b.shows.compareTo(a.shows));
-
-      if (missing.isNotEmpty && missing.first.operatorName.isEmpty) {
-        // Диагностика: имя оператора не нашлось ни под одним из ожидаемых
-        // ключей — печатаем, что реально пришло, чтобы не угадывать.
-        // ignore: avoid_print
-        print(
-          '[photo-coverage $id] оператор не найден, ключи строки: '
-          '${rows.isEmpty ? '—' : rows.first.keys.toList()}',
-        );
-      }
 
       return CampaignPhotoCoverage(
         totalSides: totalSides,

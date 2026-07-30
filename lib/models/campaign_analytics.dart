@@ -73,6 +73,10 @@ class CampaignImpressionRecord {
   final String? address;
   final String? inventoryName;
   final String? inventoryGid;
+
+  /// id поверхности. Ключ связи с ответом по фотоотчётам: там есть только
+  /// id и внутреннее имя поверхности, а GID, адрес и оператор — здесь.
+  final int? inventoryId;
   final String? side;
   final String? displayOwnerName;
   final String? mediaName;
@@ -94,6 +98,7 @@ class CampaignImpressionRecord {
     this.address,
     this.inventoryName,
     this.inventoryGid,
+    this.inventoryId,
     this.side,
     this.displayOwnerName,
     this.mediaName,
@@ -124,6 +129,7 @@ class CampaignImpressionRecord {
       address: json['address']?.toString(),
       inventoryName: inventory?['name']?.toString(),
       inventoryGid: json['inventoryGid']?.toString(),
+      inventoryId: (inventory?['id'] as num?)?.toInt(),
       side: json['side']?.toString(),
       displayOwnerName: displayOwner?['name']?.toString(),
       mediaName: media?['name']?.toString(),

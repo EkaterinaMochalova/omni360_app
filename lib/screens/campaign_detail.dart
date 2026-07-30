@@ -208,6 +208,9 @@ class _CampaignDetailScreenState extends ConsumerState<CampaignDetailScreen> {
               child: _OverviewCard(
                 campaign: campaign,
                 coverage: photoCoverage,
+                // GID и адрес для списка экранов без ФО берутся отсюда: в
+                // ответе про фотоотчёты их нет.
+                records: analytics.allRecords.asData?.value ?? const [],
               ),
             ),
             'planFact': (
@@ -472,8 +475,17 @@ class _DatesCard extends StatelessWidget {
 class _PhotoCoverageCard extends StatelessWidget {
   final AsyncValue<CampaignPhotoCoverage> coverage;
 
+  /// Выгрузка показов за выбранный период — из неё берутся GID, адрес и
+  /// оператор для списка экранов без фотоотчётов: в ответе про фотоотчёты их
+  /// нет. Пустой список — подписи будут только внутренними именами.
+  final List<CampaignImpressionRecord> records;
+
   final bool bare;
-  const _PhotoCoverageCard({required this.coverage, this.bare = false});
+  const _PhotoCoverageCard({
+    required this.coverage,
+    this.records = const [],
+    this.bare = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -550,7 +562,13 @@ class _PhotoCoverageCard extends StatelessWidget {
                 Align(
                   alignment: Alignment.centerLeft,
                   child: TextButton.icon(
-                    onPressed: () => _showMissingPhotoSides(context, value),
+                    // Карту подписей строим по клику, а не на каждой отрисовке:
+                    // в выгрузке бывают десятки тысяч записей.
+                    onPressed: () => _showMissingPhotoSides(
+                      context,
+                      value,
+                      surfaceLabels(records),
+                    ),
                     style: TextButton.styleFrom(
                       padding: const EdgeInsets.symmetric(horizontal: 4),
                       minimumSize: const Size(0, 32),
@@ -573,13 +591,73 @@ class _PhotoCoverageCard extends StatelessWidget {
   }
 }
 
-/// Список сторон без фотоотчёта: GID, оператор, город и число показов.
+/// Подписи поверхности: GID, сторона, адрес, оператор, город.
+typedef SurfaceLabel = ({
+  String gid,
+  String side,
+  String address,
+  String operatorName,
+  String city,
+});
+
+/// Карта `inventory.id` → подписи поверхности, собранная по выгрузке показов.
+///
+/// Про фотоотчёты бэкенд отдаёт только `inventory.id` и внутреннее имя вида
+/// `Estetika_5th_Saratov_Sokolovaya/Tankistov` — ни GID, ни адреса, ни
+/// оператора там нет. Зато всё это есть в каждой записи о показе, и связать
+/// два ответа можно по id поверхности.
+Map<int, SurfaceLabel> surfaceLabels(List<CampaignImpressionRecord> records) {
+  final labels = <int, SurfaceLabel>{};
+  for (final record in records) {
+    final id = record.inventoryId;
+    if (id == null || labels.containsKey(id)) continue;
+    labels[id] = (
+      gid: record.inventoryGid ?? '',
+      side: record.side ?? '',
+      address: record.address ?? '',
+      operatorName: record.displayOwnerName ?? '',
+      city: record.city ?? '',
+    );
+  }
+  return labels;
+}
+
+/// Список сторон без фотоотчёта: GID, адрес, оператор и число показов.
 void _showMissingPhotoSides(
   BuildContext context,
   CampaignPhotoCoverage coverage,
+  Map<int, SurfaceLabel> labels,
 ) {
   final fmtNum = NumberFormat.decimalPattern('ru_RU');
   final missing = coverage.missing;
+
+  SurfaceLabel? labelOf(PhotoMissingSide side) =>
+      side.inventoryId == null ? null : labels[side.inventoryId];
+
+  // Заголовок строки: GID, если он известен, иначе внутреннее имя — оно хотя
+  // бы называет улицу и оператора в своём префиксе.
+  String titleOf(PhotoMissingSide side) {
+    final label = labelOf(side);
+    final gid = label?.gid ?? '';
+    if (gid.isEmpty) return side.name.isEmpty ? 'Без названия' : side.name;
+    final sideCode = label?.side ?? '';
+    // GID уже обычно содержит сторону («645B»), дублировать её не нужно.
+    return gid.endsWith(sideCode) || sideCode.isEmpty ? gid : '$gid $sideCode';
+  }
+
+  String subtitleOf(PhotoMissingSide side) {
+    final label = labelOf(side);
+    if (label == null) return side.name;
+    final parts = [
+      if (label.address.isNotEmpty) label.address,
+      if (label.operatorName.isNotEmpty) label.operatorName,
+      if (label.city.isNotEmpty && !label.address.contains(label.city))
+        label.city,
+    ];
+    return parts.isEmpty ? side.name : parts.join(' · ');
+  }
+
+  final withoutLabels = missing.where((side) => labelOf(side) == null).length;
 
   showDialog<void>(
     context: context,
@@ -613,35 +691,34 @@ void _showMissingPhotoSides(
                   children: [
                     for (final side in missing)
                       Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        padding: const EdgeInsets.symmetric(vertical: 6),
                         child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            SizedBox(
-                              width: 150,
-                              child: Text(
-                                side.label,
-                                style: const TextStyle(
-                                  color: kTextPrimary,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
                             Expanded(
-                              child: Text(
-                                [
-                                  if (side.operatorName.isNotEmpty)
-                                    side.operatorName,
-                                  if (side.city.isNotEmpty) side.city,
-                                ].join(' · '),
-                                style: const TextStyle(
-                                  color: kTextSecondary,
-                                  fontSize: 12,
-                                ),
-                                overflow: TextOverflow.ellipsis,
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    titleOf(side),
+                                    style: const TextStyle(
+                                      color: kTextPrimary,
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    subtitleOf(side),
+                                    style: const TextStyle(
+                                      color: kTextSecondary,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
+                            const SizedBox(width: 12),
                             Text(
                               '${fmtNum.format(side.shows)} показов',
                               style: const TextStyle(
@@ -656,24 +733,43 @@ void _showMissingPhotoSides(
                 ),
               ),
             ),
+            // Подписи есть только для поверхностей, попавших в выгрузку за
+            // выбранный период, — процент покрытия при этом считается за всю
+            // кампанию. Честно говорим, чего не хватает и как дополнить.
+            if (withoutLabels > 0) ...[
+              const SizedBox(height: 12),
+              Text(
+                'Для $withoutLabels из ${missing.length} экранов GID и адрес '
+                'взять негде: их показов нет в выгрузке за выбранный период. '
+                'Включите «Весь период» — подписи заполнятся.',
+                style: const TextStyle(color: Color(0xFFE65100), fontSize: 11),
+              ),
+            ],
           ],
         ),
       ),
       actions: [
         TextButton(
-          // Список нужен, чтобы отправить его оператору, — копируем целиком.
+          // Список нужен, чтобы отправить его оператору, — копируем целиком,
+          // вместе с адресом: по одному GID оператор экран не найдёт.
           onPressed: () async {
             await Clipboard.setData(
               ClipboardData(
-                text: missing.map((side) => side.label).join('\n'),
+                text: missing
+                    .map(
+                      (side) =>
+                          '${titleOf(side)} — ${subtitleOf(side)} — '
+                          '${side.shows} показов',
+                    )
+                    .join('\n'),
               ),
             );
             if (!dialogContext.mounted) return;
             ScaffoldMessenger.of(dialogContext).showSnackBar(
-              const SnackBar(content: Text('GID скопированы')),
+              const SnackBar(content: Text('Список скопирован')),
             );
           },
-          child: const Text('Скопировать GID'),
+          child: const Text('Скопировать список'),
         ),
         FilledButton(
           onPressed: () => Navigator.pop(dialogContext),
@@ -1000,7 +1096,14 @@ class _OverviewCard extends StatelessWidget {
   final Campaign campaign;
   final AsyncValue<CampaignPhotoCoverage> coverage;
 
-  const _OverviewCard({required this.campaign, required this.coverage});
+  /// Выгрузка показов — для подписей в списке экранов без фотоотчётов.
+  final List<CampaignImpressionRecord> records;
+
+  const _OverviewCard({
+    required this.campaign,
+    required this.coverage,
+    this.records = const [],
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1014,7 +1117,11 @@ class _OverviewCard extends StatelessWidget {
           const SizedBox(height: 10),
           _DatesCard(campaign: campaign, bare: true),
           const SizedBox(height: 10),
-          _PhotoCoverageCard(coverage: coverage, bare: true),
+          _PhotoCoverageCard(
+            coverage: coverage,
+            records: records,
+            bare: true,
+          ),
         ],
       ),
     );
