@@ -165,9 +165,10 @@ class BidRaiseReportSection extends StatelessWidget {
                 headingRowHeight: 36,
                 dataRowMinHeight: 36,
                 dataRowMaxHeight: 44,
+                // Адрес убран: таблица от него разъезжалась, а сторона (А/Б)
+                // и так закодирована в GID — дублировать её незачем.
                 columns: const [
                   DataColumn(label: Text('GID')),
-                  DataColumn(label: Text('Адрес')),
                   DataColumn(label: Text('Оператор')),
                   DataColumn(label: Text('Город')),
                   DataColumn(label: Text('Проигрышей'), numeric: true),
@@ -180,11 +181,12 @@ class BidRaiseReportSection extends StatelessWidget {
                     .map(
                       (r) => DataRow(
                         cells: [
-                          DataCell(Text('${r.inventoryGid} ${r.side}')),
                           DataCell(
-                            SizedBox(
-                              width: 220,
-                              child: Text(r.address, overflow: TextOverflow.ellipsis),
+                            // Адрес — в подсказке: из таблицы он ушёл, но
+                            // понять, какая это поверхность, иногда нужно.
+                            Tooltip(
+                              message: r.address.isEmpty ? r.inventoryGid : r.address,
+                              child: Text(r.inventoryGid),
                             ),
                           ),
                           DataCell(Text(r.operatorName)),

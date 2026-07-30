@@ -202,15 +202,17 @@ class _DonutBreakdownState extends State<DonutBreakdown> {
         ? entries[index]
         : null;
 
+    // Внутри кольца помещается только две короткие строки: подсказка про клик
+    // раньше лезла на сектора и обрезалась, поэтому она ушла под легенду.
     if (entry == null) {
-      final canExpand = widget.slices.any((s) => s.expandable);
       return SizedBox(
-        width: 92,
+        width: 84,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
               _fmtInt.format(total),
+              maxLines: 1,
               style: const TextStyle(
                 color: kTextPrimary,
                 fontSize: 18,
@@ -221,14 +223,6 @@ class _DonutBreakdownState extends State<DonutBreakdown> {
               'запросов',
               style: TextStyle(color: kTextSecondary, fontSize: 11),
             ),
-            if (canExpand) ...[
-              const SizedBox(height: 4),
-              Text(
-                _expanded == null ? 'клик — по причинам' : 'клик — свернуть',
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: kTextSecondary, fontSize: 9),
-              ),
-            ],
           ],
         ),
       );
@@ -236,33 +230,35 @@ class _DonutBreakdownState extends State<DonutBreakdown> {
 
     final percent = total == 0 ? 0.0 : entry.slice.value / total * 100;
     return SizedBox(
-      width: 96,
+      width: 84,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(
             entry.slice.label,
             textAlign: TextAlign.center,
-            maxLines: 3,
+            maxLines: 2,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
               color: entry.slice.color,
-              fontSize: 10,
+              fontSize: 9,
+              height: 1.15,
               fontWeight: FontWeight.w700,
             ),
           ),
           const SizedBox(height: 2),
           Text(
             _fmtInt.format(entry.slice.value),
+            maxLines: 1,
             style: const TextStyle(
               color: kTextPrimary,
-              fontSize: 16,
+              fontSize: 15,
               fontWeight: FontWeight.bold,
             ),
           ),
           Text(
             '${percent.toStringAsFixed(1)}%',
-            style: const TextStyle(color: kTextSecondary, fontSize: 11),
+            style: const TextStyle(color: kTextSecondary, fontSize: 10),
           ),
         ],
       ),
@@ -286,11 +282,13 @@ class _DonutBreakdownState extends State<DonutBreakdown> {
             },
             onTap: () => _toggle(entries[i].slice.label),
           ),
-        if (_expanded != null)
+        if (widget.slices.any((s) => s.expandable))
           Padding(
             padding: const EdgeInsets.only(top: 6, left: 6),
             child: Text(
-              'Показаны причины проигрышей. Клик — вернуться.',
+              _expanded == null
+                  ? 'Клик по проигрышам — разбить на причины'
+                  : 'Показаны причины проигрышей. Клик — вернуться',
               style: const TextStyle(color: kTextSecondary, fontSize: 10),
             ),
           ),

@@ -31,27 +31,49 @@ class CardSection extends StatelessWidget {
           ),
         ],
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            title,
-            style: const TextStyle(
-              color: kTextPrimary,
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          if (subtitle != null) ...[
-            const SizedBox(height: 4),
+      // Если высота блока задана вручную и содержимое в неё не влезает,
+      // прокручиваем содержимое ВНУТРИ карточки. Прокрутка вокруг карточки
+      // срезала ей углы и тень, а без прокрутки блок вообще не сжимался.
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final header = <Widget>[
             Text(
-              subtitle!,
-              style: const TextStyle(color: kTextSecondary, fontSize: 12),
+              title,
+              style: const TextStyle(
+                color: kTextPrimary,
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+              ),
             ),
-          ],
-          const SizedBox(height: 12),
-          child,
-        ],
+            if (subtitle != null) ...[
+              const SizedBox(height: 4),
+              Text(
+                subtitle!,
+                style: const TextStyle(color: kTextSecondary, fontSize: 12),
+              ),
+            ],
+            const SizedBox(height: 12),
+          ];
+
+          if (!constraints.hasBoundedHeight) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [...header, child],
+            );
+          }
+
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ...header,
+              // Заголовок остаётся на месте, прокручивается только содержимое.
+              Flexible(
+                child: SingleChildScrollView(child: child),
+              ),
+            ],
+          );
+        },
       ),
     );
   }

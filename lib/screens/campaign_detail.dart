@@ -273,31 +273,53 @@ class _CampaignDetailScreenState extends ConsumerState<CampaignDetailScreen> {
                 campaign: campaign,
                 stats: stats.valueOrNull,
               ),
-              // Пока что-то грузится, это должно быть видно: без полоски и
-              // подписи недогруженный дашборд выглядит просто пустым.
+              // Тонкая полоска в 2 пикселя терялась, и смена периода выглядела
+              // так, будто ничего не происходит. Теперь это заметная плашка
+              // с крутилкой сразу под выбором периода.
               if (analytics.impressions.isLoading ||
                   analytics.allRecords.isLoading)
-                Column(
-                  children: [
-                    const LinearProgressIndicator(
-                      minHeight: 2,
-                      color: kAccent,
-                      backgroundColor: Color(0xFFE3E7EE),
+                Container(
+                  width: double.infinity,
+                  color: Colors.white,
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
                     ),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 6),
-                      child: Text(
-                        analytics.impressions.isLoading
-                            ? 'Загружаем аналитику за выбранный период…'
-                            : 'Дашборд готов, догружаем полную выгрузку '
-                                  'показов для отчётов…',
-                        style: const TextStyle(
-                          color: kTextSecondary,
-                          fontSize: 12,
+                    decoration: BoxDecoration(
+                      color: kAccentLight,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: kAccent.withValues(alpha: 0.3)),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: kAccent,
+                          ),
                         ),
-                      ),
+                        const SizedBox(width: 10),
+                        Flexible(
+                          child: Text(
+                            analytics.impressions.isLoading
+                                ? 'Загружаем данные за выбранный период…'
+                                : 'Дашборд готов, догружаем полную выгрузку '
+                                      'показов для отчётов…',
+                            style: const TextStyle(
+                              color: kAccent,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
               if (analytics.impressions.hasError)
                 Padding(
@@ -323,6 +345,7 @@ class _CampaignDetailScreenState extends ConsumerState<CampaignDetailScreen> {
                     analytics.allRecords.asData?.value ?? const [],
                   ),
                   onPageChange: analyticsController.setPage,
+                  onLoadAllRecords: analyticsController.loadAllRecords,
                   extraBlocks: blocksById,
                   extraBlockIds: _kDetailBlockIds,
                 ),
@@ -590,6 +613,24 @@ class _PlanFactCard extends StatelessWidget {
       );
     }
 
+    // В час — сразу за суточным, чтобы бюджетные метрики шли подряд.
+    if (s != null && (s.hourlyBudgetPlan > 0 || s.hourlyBudgetFact > 0)) {
+      rows.add(
+        _PlanFactRow(
+          label: 'В час',
+          plan: s.hourlyBudgetPlan > 0
+              ? fmtRub.format(s.hourlyBudgetPlan)
+              : '—',
+          fact: s.hourlyBudgetFact > 0
+              ? fmtRub.format(s.hourlyBudgetFact)
+              : null,
+          ratio: (s.hourlyBudgetPlan > 0 && s.hourlyBudgetFact > 0)
+              ? s.hourlyBudgetFact / s.hourlyBudgetPlan
+              : null,
+        ),
+      );
+    }
+
     // OTS — показываем если есть план ИЛИ факт
     final factOts = (s != null && s.factOts > 0) ? s.factOts : null;
     // Измеренного OTS у части кампаний нет, и факт подставляется из
@@ -622,24 +663,6 @@ class _PlanFactCard extends StatelessWidget {
           fact: fmtNum.format(s.factExits),
           ratio: (planExits != null && planExits > 0)
               ? s.factExits / planExits
-              : null,
-        ),
-      );
-    }
-
-    // Бюджет в час и CPM переехали сюда из второй карточки подробной
-    // статистики: две почти одинаковые карточки схлопнуты в одну, и осталась
-    // та, где у каждой метрики есть шкала выполнения.
-    if (s != null && (s.hourlyBudgetPlan > 0 || s.hourlyBudgetFact > 0)) {
-      rows.add(
-        _PlanFactRow(
-          label: 'Бюджет в час',
-          plan: s.hourlyBudgetPlan > 0 ? fmtRub.format(s.hourlyBudgetPlan) : '—',
-          fact: s.hourlyBudgetFact > 0
-              ? fmtRub.format(s.hourlyBudgetFact)
-              : null,
-          ratio: (s.hourlyBudgetPlan > 0 && s.hourlyBudgetFact > 0)
-              ? s.hourlyBudgetFact / s.hourlyBudgetPlan
               : null,
         ),
       );
@@ -728,11 +751,19 @@ class _PlanFactRow extends StatelessWidget {
     required this.ratio,
   });
 
+  /// Цвет шкалы по близости факта к плану.
+  ///
+  /// Раньше логика была обратной: чем меньше освоено, тем «зеленее». Из-за
+  /// этого кампания, освоившая 35% бюджета к концу срока, выглядела здоровой,
+  /// а почти выполнившая план — красной. Зелёный теперь означает «идём по
+  /// плану», а не «мало потратили».
   Color get _barColor {
-    if (ratio == null) return kAccent;
-    if (ratio! > 0.85) return Colors.redAccent;
-    if (ratio! > 0.5) return kAccent;
-    return const Color(0xFF43A047); // green
+    final value = ratio;
+    if (value == null) return kAccent;
+    if (value > 1.1) return Colors.redAccent; // перерасход
+    if (value >= 0.9) return const Color(0xFF43A047); // по плану
+    if (value >= 0.7) return const Color(0xFFF9A825); // подотстаём
+    return Colors.redAccent; // сильно отстаём
   }
 
   @override
@@ -827,190 +858,6 @@ class _PlanFactRow extends StatelessWidget {
   }
 }
 
-// ── Detailed stats card ───────────────────────────────────────────────────────
-
-class _DetailedStatsCard extends StatelessWidget {
-  final Campaign campaign;
-  final CampaignStats? stats;
-
-  const _DetailedStatsCard({required this.campaign, required this.stats});
-
-  @override
-  Widget build(BuildContext context) {
-    final fmtRub = NumberFormat.currency(
-      locale: 'ru_RU',
-      symbol: '₽',
-      decimalDigits: 0,
-    );
-    final fmtNum = NumberFormat.decimalPattern('ru_RU');
-    final s = stats;
-
-    String rub(double? value) =>
-        value != null && value > 0 ? fmtRub.format(value) : '—';
-    String num(double? value) =>
-        value != null && value > 0 ? fmtNum.format(value) : '—';
-    String intNum(int? value) =>
-        value != null && value > 0 ? fmtNum.format(value) : '—';
-
-    // Выходы в час = общий план выходов ÷ часы вещания за весь срок кампании
-    // (по её расписанию), а не ÷ 14 зашитых часов: exits — это выходы за всю
-    // кампанию, и делить их как суточные значит завысить план в разы.
-    final totalHours = totalBroadcastHours(campaign);
-    final planHourlyExits = ((campaign.exits ?? 0) > 0 && totalHours != null)
-        ? (campaign.exits! / totalHours)
-        : null;
-
-    // /impression-stats (CampaignStats) — источник истины для плана: карточка
-    // кампании (Campaign.budget/dailyBudget/ots) не всегда его заполняет,
-    // а /impression-stats уже парсится в planBudget/planDailyBudget/planOts.
-    // Используем стату в приоритете, поле кампании — как запасной вариант.
-    double? firstPositive(double? a, double? b) {
-      if (a != null && a > 0) return a;
-      if (b != null && b > 0) return b;
-      return null;
-    }
-
-    final planBudget = firstPositive(s?.planBudget, campaign.budget);
-    final planDailyBudget = firstPositive(s?.planDailyBudget, campaign.dailyBudget);
-    // Только лимит из кампании — см. пояснение в блоке «План / Факт».
-    final planOts = firstPositive(campaign.ots, null);
-
-    final rows = <_DetailedStatRowData>[
-      _DetailedStatRowData(
-        label: 'Бюджет общий',
-        plan: rub(planBudget),
-        fact: rub(s?.factBudget),
-        ratio: _ratio(planBudget, s?.factBudget),
-      ),
-      _DetailedStatRowData(
-        label: 'Бюджет в день',
-        plan: rub(planDailyBudget),
-        fact: rub(s?.factDailyBudget),
-        ratio: _ratio(planDailyBudget, s?.factDailyBudget),
-      ),
-      _DetailedStatRowData(
-        label: 'Бюджет в час',
-        plan: rub(s?.hourlyBudgetPlan),
-        fact: rub(s?.hourlyBudgetFact),
-        ratio: _ratio(s?.hourlyBudgetPlan, s?.hourlyBudgetFact),
-      ),
-      _DetailedStatRowData(
-        label: (s?.factOtsIsEstimated ?? false) ? 'OTS общий (оценка)' : 'OTS общий',
-        plan: num(planOts),
-        fact: num(s?.factOts),
-        ratio: _ratio(planOts, s?.factOts),
-      ),
-      _DetailedStatRowData(
-        label: 'OTS в час',
-        plan: num(s?.hourlyOtsPlan),
-        fact: num(s?.hourlyOtsFact),
-        ratio: _ratio(s?.hourlyOtsPlan, s?.hourlyOtsFact),
-      ),
-      _DetailedStatRowData(
-        label: 'Выходы общие',
-        plan: num(campaign.exits),
-        fact: intNum(s?.factExits),
-        ratio: _ratio(campaign.exits, s?.factExits.toDouble()),
-      ),
-      _DetailedStatRowData(
-        label: 'Выходы в час',
-        plan: num(planHourlyExits),
-        fact: intNum(s?.hourlyExitsFact),
-        ratio: _ratio(planHourlyExits, s?.hourlyExitsFact.toDouble()),
-      ),
-      _DetailedStatRowData(
-        label: 'CPM',
-        plan: '—',
-        fact: rub(s?.cpm),
-        ratio: null,
-      ),
-    ].where((row) => row.plan != '—' || row.fact != '—').toList();
-
-    if (rows.isEmpty) return const SizedBox.shrink();
-
-    return _Card(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'Подробная статистика',
-            style: TextStyle(
-              color: kTextPrimary,
-              fontSize: 15,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 6),
-          const Text(
-            'Построчно по ключевым метрикам кампании',
-            style: TextStyle(color: kTextSecondary, fontSize: 12),
-          ),
-          const SizedBox(height: 14),
-          LayoutBuilder(
-            builder: (context, constraints) {
-              const tileWidth = 140.0;
-              const spacing = 12.0;
-              var columns = ((constraints.maxWidth + spacing) /
-                      (tileWidth + spacing))
-                  .floor();
-              if (columns < 1) columns = 1;
-
-              return Wrap(
-                spacing: spacing,
-                runSpacing: spacing,
-                children: rows
-                    .map(
-                      (row) => SizedBox(
-                        width:
-                            (constraints.maxWidth -
-                                spacing * (columns - 1)) /
-                            columns,
-                        child: _DetailedStatTile(row: row),
-                      ),
-                    )
-                    .toList(),
-              );
-            },
-          ),
-        ],
-      ),
-    );
-  }
-
-  static double? _ratio(double? plan, double? fact) {
-    if (plan == null || fact == null || plan <= 0 || fact <= 0) return null;
-    return fact / plan;
-  }
-}
-
-/// Обзор кампании: статус, даты, фотоотчёты и сводка по запросам в одном
-/// блоке. По отдельности это были четыре карточки в одну-две строки каждая.
-class _OverviewCard extends StatelessWidget {
-  final Campaign campaign;
-  final AsyncValue<CampaignPhotoCoverage> coverage;
-
-  const _OverviewCard({required this.campaign, required this.coverage});
-
-  @override
-  Widget build(BuildContext context) {
-    // Сводка по запросам переехала в блок с диаграммой — там она о том же, о
-    // чём диаграмма, и не отрывает цифры от разбивки.
-    return _Card(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _StatusCard(campaign: campaign, bare: true),
-          const SizedBox(height: 10),
-          _DatesCard(campaign: campaign, bare: true),
-          const SizedBox(height: 10),
-          _PhotoCoverageCard(coverage: coverage, bare: true),
-        ],
-      ),
-    );
-  }
-
-}
-
 /// Полоса предупреждений о темпе в шапке дашборда.
 ///
 /// Расписание берётся из самой кампании — детальный ответ его содержит, так
@@ -1026,8 +873,16 @@ class _PaceAlertsBar extends StatelessWidget {
     final s = stats;
     if (s == null) return const SizedBox.shrink();
 
+    // Внутридневные алерты живут только внутри окна вещания: их темп считается
+    // от доли прошедшего эфира. Вне окна они молчат — и раньше это выглядело
+    // так, будто у кампании всё в порядке. Поэтому рядом идёт проверка по
+    // всему периоду, которая от времени суток не зависит.
     final alerts = buildAlerts(campaign, s);
-    if (alerts.isEmpty) return const SizedBox.shrink();
+    final periodChip = _periodChip(s);
+
+    if (alerts.isEmpty && periodChip == null) {
+      return const SizedBox.shrink();
+    }
 
     return Container(
       width: double.infinity,
@@ -1036,7 +891,68 @@ class _PaceAlertsBar extends StatelessWidget {
       child: Wrap(
         spacing: 8,
         runSpacing: 6,
-        children: alerts.map((a) => _AlertBanner(alert: a)).toList(),
+        children: [
+          if (periodChip != null) periodChip,
+          ...alerts.map((a) => _AlertBanner(alert: a)),
+        ],
+      ),
+    );
+  }
+
+  /// Отставание по бюджету за весь период кампании.
+  Widget? _periodChip(CampaignStats s) {
+    final spent = (campaign.spent != null && campaign.spent! > 0)
+        ? campaign.spent!
+        : s.factBudget;
+    final pace = CampaignPaceSummary.fromCampaign(
+      campaign,
+      DateTime.now(),
+      spentOverride: spent,
+      budgetOverride: s.planBudget,
+    );
+    if (pace.planToNow <= 0) return null;
+
+    final ratio = pace.pacePctNow;
+    // Отклонение меньше 10% — шум, о нём сообщать незачем.
+    if (ratio >= 0.9 && ratio <= 1.1) return null;
+
+    final behind = ratio < 1;
+    final color = behind ? const Color(0xFF1565C0) : const Color(0xFFC62828);
+    final bg = behind ? const Color(0xFFE3F2FD) : const Color(0xFFFFEBEE);
+    final fmtRub = NumberFormat.currency(
+      locale: 'ru_RU',
+      symbol: '₽',
+      decimalDigits: 0,
+    );
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(behind ? '📉' : '⚡', style: const TextStyle(fontSize: 14)),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              behind
+                  ? 'За период отстаём от плана на '
+                        '${fmtRub.format(pace.shortfallNow)} '
+                        '(${(ratio * 100).toStringAsFixed(0)}% плана)'
+                  : 'За период идём выше плана: '
+                        '${(ratio * 100).toStringAsFixed(0)}% плана',
+              style: TextStyle(
+                color: color,
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1225,89 +1141,6 @@ class _LimitsCard extends StatelessWidget {
   }
 }
 
-class _DetailedStatRowData {
-  final String label;
-  final String plan;
-  final String fact;
-  final double? ratio;
-
-  const _DetailedStatRowData({
-    required this.label,
-    required this.plan,
-    required this.fact,
-    required this.ratio,
-  });
-}
-
-class _DetailedStatTile extends StatelessWidget {
-  final _DetailedStatRowData row;
-
-  const _DetailedStatTile({required this.row});
-
-  @override
-  Widget build(BuildContext context) {
-    final completion = row.ratio == null
-        ? null
-        : '${(row.ratio! * 100).toStringAsFixed(0)}% плана';
-    final deltaColor = row.ratio == null
-        ? kTextSecondary
-        : row.ratio! > 1.05
-        ? const Color(0xFFC62828)
-        : row.ratio! < 0.95
-        ? const Color(0xFF1565C0)
-        : const Color(0xFF2E7D32);
-
-    // Каждая метрика — отдельная плашка с фоном и рамкой: без них десяток
-    // метрик сливался в одну простыню, и глазом их было не разделить.
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: kBg,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: kBorder),
-      ),
-      child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(
-          row.label,
-          style: const TextStyle(
-            color: kTextSecondary,
-            fontSize: 11,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          'План: ${row.plan}',
-          style: const TextStyle(color: kTextSecondary, fontSize: 13),
-        ),
-        Text(
-          row.fact,
-          style: const TextStyle(
-            color: kTextPrimary,
-            fontSize: 14,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        if (completion != null) ...[
-          const SizedBox(height: 2),
-          Text(
-            completion,
-            style: TextStyle(
-              color: deltaColor,
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ],
-      ],
-      ),
-    );
-  }
-}
-
 // ── Chart card ────────────────────────────────────────────────────────────────
 
 class _ChartCard extends StatelessWidget {
@@ -1460,18 +1293,24 @@ class _Card extends StatelessWidget {
   Widget build(BuildContext context) => bare
       ? child
       : Container(
-    padding: const EdgeInsets.all(16),
-    decoration: BoxDecoration(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(14),
-      boxShadow: [
-        BoxShadow(
-          color: Colors.black.withValues(alpha: 0.04),
-          blurRadius: 8,
-          offset: const Offset(0, 2),
-        ),
-      ],
-    ),
-    child: child,
-  );
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(14),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.04),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          // При заданной вручную высоте прокручиваем содержимое внутри
+          // карточки: прокрутка вокруг неё срезала углы и тень.
+          child: LayoutBuilder(
+            builder: (context, constraints) => constraints.hasBoundedHeight
+                ? SingleChildScrollView(child: child)
+                : child,
+          ),
+        );
 }

@@ -134,6 +134,11 @@ class CampaignAnalyticsController
 
   final String campaignId;
   final Omni360Client _client;
+
+  /// Снят ли предел на число страниц полной выгрузки. Ставится только по явной
+  /// команде пользователя и сбрасывается при смене периода: молча тянуть сотни
+  /// страниц при каждом переключении — это те самые минуты ожидания.
+  bool _loadAllPages = false;
   final FlutterSecureStorage _storage = const FlutterSecureStorage();
 
   String get _prefsKey => 'campaign_analytics_dashboard_prefs';
@@ -236,10 +241,23 @@ class CampaignAnalyticsController
   }
 
   Future<void> setRange(DateTime start, DateTime end) async {
+    // Новый период — снова с пределом: снятие относится к конкретной выборке.
+    _loadAllPages = false;
     state = state.copyWith(
       query: state.query.copyWith(start: start, end: end, page: 0),
     );
     await fetchImpressions();
+  }
+
+  /// Догрузить весь период, не считаясь с пределом по страницам.
+  Future<void> loadAllRecords() async {
+    _loadAllPages = true;
+    state = state.copyWith(
+      aggregate: const AsyncValue.loading(),
+      allRecords: const AsyncValue.loading(),
+      allRecordsComplete: true,
+    );
+    await _loadAggregateAndRecords(state.query);
   }
 
   Future<void> setStates(Set<String> values) async {
@@ -424,11 +442,12 @@ class CampaignAnalyticsController
     );
     final allRecords = <CampaignImpressionRecord>[...firstPage.content];
 
-    // Верхняя граница по страницам: на широком периоде их бывают сотни, и
-    // экран уходил в многоминутное ожидание. 40 страниц по 500 — это 20 тысяч
-    // показов, дальше отчёты всё равно смотреть смысла мало.
+    // Верхняя граница по страницам, чтобы широкий период не уводил экран в
+    // многоминутное ожидание по умолчанию. Снимается по кнопке «Загрузить
+    // всё»: на крупных кампаниях в 20 тысяч показов не влезает и пара дней,
+    // так что полный период должен быть доступен — просто по запросу.
     const maxPages = 40;
-    final pagesToLoad = firstPage.totalPages < maxPages
+    final pagesToLoad = (_loadAllPages || firstPage.totalPages < maxPages)
         ? firstPage.totalPages
         : maxPages;
     var complete = firstPage.totalPages <= pagesToLoad;

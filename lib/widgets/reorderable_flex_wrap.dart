@@ -217,20 +217,14 @@ class _ReorderableFlexWrapState<T> extends State<ReorderableFlexWrap<T>> {
                           }),
                           child: grip,
                         ),
-                        // Высота — это минимум, а не жёсткий размер. Жёсткий
-                        // обрезал карточку: скруглённые углы и тень уходили
-                        // под границу, а содержимое некуда было девать.
-                        // С минимумом карточка растягивается до заданной
-                        // высоты и растёт дальше, если содержимому мало.
+                        // Заданная высота — жёсткая, чтобы блок можно было и
+                        // сжать. Обрезки при этом нет: карточки (CardSection и
+                        // _Card) при ограниченной высоте прокручивают
+                        // содержимое внутри себя, сохраняя рамку и тень.
                         Expanded(
                           child: height == null
                               ? content
-                              : ConstrainedBox(
-                                  constraints: BoxConstraints(
-                                    minHeight: height,
-                                  ),
-                                  child: content,
-                                ),
+                              : SizedBox(height: height, child: content),
                         ),
                       ],
                     ),

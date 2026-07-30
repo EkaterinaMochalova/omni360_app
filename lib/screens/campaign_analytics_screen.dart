@@ -484,6 +484,7 @@ Widget _fromAllRecords(
   String title,
   Widget Function() build, {
   bool complete = true,
+  VoidCallback? onLoadAll,
 }) {
   return records.when(
     data: (loaded) => complete
@@ -503,13 +504,32 @@ Widget _fromAllRecords(
                   color: const Color(0xFFFFF3E0),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: Text(
-                  'Выгрузка неполная: посчитано по ${loaded.length} показам. '
-                  'Сузьте период, чтобы увидеть все.',
-                  style: const TextStyle(
-                    color: Color(0xFFE65100),
-                    fontSize: 11,
-                  ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Выгрузка неполная: посчитано по ${loaded.length} '
+                        'показам.',
+                        style: const TextStyle(
+                          color: Color(0xFFE65100),
+                          fontSize: 11,
+                        ),
+                      ),
+                    ),
+                    if (onLoadAll != null)
+                      TextButton(
+                        onPressed: onLoadAll,
+                        style: TextButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          minimumSize: const Size(0, 28),
+                          foregroundColor: const Color(0xFFE65100),
+                        ),
+                        child: const Text(
+                          'Загрузить весь период',
+                          style: TextStyle(fontSize: 11),
+                        ),
+                      ),
+                  ],
                 ),
               ),
               build(),
@@ -563,6 +583,9 @@ class CampaignDashboardBody extends StatefulWidget {
   final CampaignAnalyticsAggregate aggregate;
   final LossReport lossReport;
   final ValueChanged<int> onPageChange;
+
+  /// Догрузить весь период, сняв предел по страницам.
+  final VoidCallback? onLoadAllRecords;
   final Map<String, DashboardBlock> extraBlocks;
   final List<String> extraBlockIds;
 
@@ -573,6 +596,7 @@ class CampaignDashboardBody extends StatefulWidget {
     required this.aggregate,
     required this.lossReport,
     required this.onPageChange,
+    this.onLoadAllRecords,
     this.extraBlocks = const {},
     this.extraBlockIds = const [],
   });
@@ -756,6 +780,7 @@ class _CampaignDashboardBodyState extends State<CampaignDashboardBody> {
             'Сводная по дням',
             () => DailyBreakdownSection(rows: lossReport.dailyBreakdown),
             complete: state.allRecordsComplete,
+            onLoadAll: widget.onLoadAllRecords,
           ),
         ),
       if (state.prefs.showBidReport)
@@ -767,6 +792,7 @@ class _CampaignDashboardBodyState extends State<CampaignDashboardBody> {
             'Поднять ставки',
             () => BidRaiseReportSection(rows: lossReport.bidRaiseRows),
             complete: state.allRecordsComplete,
+            onLoadAll: widget.onLoadAllRecords,
           ),
         ),
       if (state.prefs.showOperatorReport)
@@ -780,6 +806,7 @@ class _CampaignDashboardBodyState extends State<CampaignDashboardBody> {
               groups: lossReport.operatorIssueGroups,
             ),
             complete: state.allRecordsComplete,
+            onLoadAll: widget.onLoadAllRecords,
           ),
         ),
     };
