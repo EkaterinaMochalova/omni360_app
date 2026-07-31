@@ -121,8 +121,8 @@ class _JumperGameState extends State<_JumperGame>
         _billboards.add(
           _Billboard(
             x: _width + 10,
-            width: 14 + _rnd.nextInt(10),
-            height: 24 + _rnd.nextInt(18),
+            width: (14 + _rnd.nextInt(10)).toDouble(),
+            height: (24 + _rnd.nextInt(18)).toDouble(),
           ),
         );
       }
@@ -370,9 +370,13 @@ class _JumperPainter extends CustomPainter {
 
 // ── Игра 2: три в ряд ────────────────────────────────────────────────────────
 
-/// Элемент поля. Цвет — основной признак: если эмодзи в системе не окажется,
-/// плитки всё равно останутся различимыми.
+/// Элемент поля.
+///
+/// Цвет плитки несёт ту же информацию, что и картинка с символом: если эмодзи в
+/// системе не окажется, элементы всё равно останутся различимыми.
 class _Gem {
+  /// Картинка из assets. Если задана — рисуем её вместо [glyph].
+  final String? asset;
   final String glyph;
   final String? badge;
   final Color color;
@@ -383,6 +387,7 @@ class _Gem {
     required this.glyph,
     required this.color,
     required this.name,
+    this.asset,
     this.badge,
     this.fontSize = 20,
   });
@@ -390,12 +395,14 @@ class _Gem {
 
 const _gems = <_Gem>[
   _Gem(
+    asset: 'assets/game/kirkorov.png',
     glyph: 'ФК',
     color: Color(0xFF7B1FA2),
     name: 'Киркоров',
     fontSize: 14,
   ),
   _Gem(
+    asset: 'assets/game/baskov.png',
     glyph: 'НБ',
     color: Color(0xFFF9A825),
     name: 'Басков',
@@ -410,9 +417,10 @@ const _gems = <_Gem>[
     fontSize: 12,
   ),
   _Gem(
+    asset: 'assets/game/dragon.png',
     glyph: '🐉',
     badge: '4',
-    color: Color(0xFF00838F),
+    color: Color(0xFFB8860B),
     name: 'дракон с четвёркой',
   ),
 ];
@@ -635,7 +643,13 @@ class _MatchThreeGameState extends State<_MatchThreeGame> {
         ),
         const SizedBox(height: 6),
         Text(
-          _gems.map((gem) => '${gem.glyph} — ${gem.name}').join(' · '),
+          // У элементов с картинкой подпись не нужна — понятно и так.
+          _gems
+              .map(
+                (gem) =>
+                    gem.asset != null ? gem.name : '${gem.glyph} — ${gem.name}',
+              )
+              .join(' · '),
           style: const TextStyle(color: kTextSecondary, fontSize: 10),
         ),
       ],
@@ -676,25 +690,51 @@ class _GemTile extends StatelessWidget {
           child: Stack(
             children: [
               Center(
-                child: Text(
-                  gem.glyph,
-                  style: TextStyle(
-                    fontSize: gem.fontSize,
-                    fontWeight: FontWeight.w700,
-                    color: gem.color,
-                  ),
-                ),
+                child: gem.asset != null
+                    ? Padding(
+                        padding: const EdgeInsets.all(3),
+                        child: Image.asset(
+                          gem.asset!,
+                          fit: BoxFit.contain,
+                          filterQuality: FilterQuality.medium,
+                          // Если картинка почему-то не подгрузилась, плитка не
+                          // должна превращаться в красный крест.
+                          errorBuilder: (context, error, stack) => Text(
+                            gem.glyph,
+                            style: TextStyle(
+                              fontSize: gem.fontSize,
+                              fontWeight: FontWeight.w700,
+                              color: gem.color,
+                            ),
+                          ),
+                        ),
+                      )
+                    : Text(
+                        gem.glyph,
+                        style: TextStyle(
+                          fontSize: gem.fontSize,
+                          fontWeight: FontWeight.w700,
+                          color: gem.color,
+                        ),
+                      ),
               ),
               if (gem.badge != null)
                 Positioned(
-                  right: 2,
-                  top: 0,
-                  child: Text(
-                    gem.badge!,
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w800,
-                      color: gem.color,
+                  right: 1,
+                  top: 1,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 3),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.85),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      gem.badge!,
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                        color: gem.color,
+                      ),
                     ),
                   ),
                 ),
