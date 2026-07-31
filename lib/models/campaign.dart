@@ -62,6 +62,127 @@ class TimeSlot {
   }
 }
 
+/// Рекламная поверхность из состава кампании: GID, оператор, адрес.
+///
+/// Ответ `impression-inventory-stats`, по которому считаются фотоотчёты, знает
+/// про поверхность только `inventory.id` и внутреннее имя. GID и оператор есть
+/// здесь, в детальном ответе по кампании, — он уже загружен и закеширован, так
+/// что связать одно с другим можно без единого дополнительного запроса.
+class CampaignInventoryRef {
+  final int id;
+  final String gid;
+  final String name;
+  final String operatorName;
+  final String address;
+  final String city;
+
+  const CampaignInventoryRef({
+    required this.id,
+    required this.gid,
+    required this.name,
+    required this.operatorName,
+    required this.address,
+    required this.city,
+  });
+
+  /// Собирает состав кампании с любой глубины ответа.
+  ///
+  /// Поверхности лежат в `segments[].inventories[]`, но раскладка отличается от
+  /// кампании к кампании (как это уже было с расписанием), поэтому ищем
+  /// рекурсивно. Признак поверхности — пара `id` + непустой `gid`.
+  ///
+  /// Оператор и город на самой поверхности обычно не указаны: они заданы выше,
+  /// на уровне сегмента, — поэтому ближайшее найденное значение передаётся
+  /// вниз по обходу.
+  static Map<int, CampaignInventoryRef> collectFrom(Map<String, dynamic> json) {
+    final found = <int, CampaignInventoryRef>{};
+
+    // Ветки, где поверхностей быть не может, но есть свои id и gid: заходить в
+    // них — значит рисковать принять бренд или агентство за экран.
+    const skipKeys = {
+      'brand',
+      'customer',
+      'agency',
+      'createdBy',
+      'budgetConfig',
+      'photoReportSettings',
+      'strategy',
+      'warnings',
+      'timeSettings',
+    };
+
+    String textOf(dynamic value) {
+      if (value is String) return value.trim();
+      if (value is Map) return value['name']?.toString().trim() ?? '';
+      return '';
+    }
+
+    String firstText(List<dynamic> values, String fallback) {
+      for (final value in values) {
+        final text = textOf(value);
+        if (text.isNotEmpty) return text;
+      }
+      return fallback;
+    }
+
+    void walk(dynamic current, int depth, String owner, String city, bool root) {
+      if (depth > 10) return;
+      if (current is Map) {
+        final nextOwner = firstText([
+          current['displayOwner'],
+          current['displayOwnerDTO'],
+          current['owner'],
+        ], owner);
+        final nextCity = firstText([current['city']], city);
+
+        final id = _toInt(current['id']);
+        final gid = current['gid']?.toString().trim() ?? '';
+        // Корневой узел — сама кампания, у неё тоже есть id и gid.
+        if (!root && id != null && gid.isNotEmpty) {
+          found.putIfAbsent(
+            id,
+            () => CampaignInventoryRef(
+              id: id,
+              gid: gid,
+              name: current['name']?.toString() ?? '',
+              operatorName: nextOwner,
+              address: firstText([
+                current['address'],
+                (current['location'] as Map?)?['address'],
+              ], ''),
+              city: nextCity,
+            ),
+          );
+        }
+
+        for (final entry in current.entries) {
+          if (skipKeys.contains(entry.key.toString())) continue;
+          walk(entry.value, depth + 1, nextOwner, nextCity, false);
+        }
+      } else if (current is List) {
+        for (final value in current) {
+          walk(value, depth + 1, owner, city, false);
+        }
+      }
+    }
+
+    walk(json, 0, '', '', true);
+
+    if (found.isEmpty && (json['segments'] as List? ?? const []).isNotEmpty) {
+      // Диагностика: сегменты есть, а поверхностей с gid в них не нашлось —
+      // печатаем, как выглядит сегмент, чтобы не угадывать раскладку.
+      final segment = (json['segments'] as List).first;
+      // ignore: avoid_print
+      print(
+        '[inventory ${json['id']}] поверхности с gid не найдены. '
+        'Ключи сегмента: ${segment is Map ? segment.keys.toList() : segment}',
+      );
+    }
+
+    return found;
+  }
+}
+
 class Campaign {
   final String id;
   final String name;
@@ -89,6 +210,10 @@ class Campaign {
   final List<String> formats;
   final List<TimeSlot>? timeSettings;
 
+  /// Состав кампании: `inventory.id` → GID, оператор, адрес. Пустая карта у
+  /// списочного ответа — поверхности приходят только в детальном.
+  final Map<int, CampaignInventoryRef> inventories;
+
   const Campaign({
     required this.id,
     required this.name,
@@ -115,6 +240,7 @@ class Campaign {
     this.displayOwnerNameToId = const {},
     this.formats = const [],
     this.timeSettings,
+    this.inventories = const {},
   });
 
   factory Campaign.fromJson(Map<String, dynamic> json) {
@@ -176,6 +302,7 @@ class Campaign {
       displayOwnerNameToId: displayOwnerNameToId,
       formats: _extractFormats(json),
       timeSettings: TimeSlot.collectFrom(json),
+      inventories: CampaignInventoryRef.collectFrom(json),
     );
   }
 
@@ -412,6 +539,7 @@ class Campaign {
       displayOwnerNameToId: displayOwnerNameToId ?? this.displayOwnerNameToId,
       formats: formats,
       timeSettings: timeSettings,
+      inventories: inventories,
     );
   }
 

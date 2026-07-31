@@ -62,6 +62,40 @@ class CampaignAnalyticsFiltersData {
   }
 }
 
+/// Подписи рекламной поверхности: GID, сторона, адрес, оператор, город.
+///
+/// Живут только в выгрузке показов. В ответе `impression-inventory-stats`, по
+/// которому считаются фотоотчёты, про поверхность есть лишь `inventory.id` и
+/// внутреннее имя вида `Estetika_5th_Saratov_Sokolovaya/Tankistov`, поэтому два
+/// ответа связываются по id.
+typedef SurfaceLabel = ({
+  String gid,
+  String side,
+  String address,
+  String operatorName,
+  String city,
+});
+
+/// Карта `inventory.id` → подписи, собранная по записям о показах.
+Map<int, SurfaceLabel> surfaceLabelsFromRecords(
+  List<CampaignImpressionRecord> records, {
+  Map<int, SurfaceLabel>? into,
+}) {
+  final labels = into ?? <int, SurfaceLabel>{};
+  for (final record in records) {
+    final id = record.inventoryId;
+    if (id == null || labels.containsKey(id)) continue;
+    labels[id] = (
+      gid: record.inventoryGid ?? '',
+      side: record.side ?? '',
+      address: record.address ?? '',
+      operatorName: record.displayOwnerName ?? '',
+      city: record.city ?? '',
+    );
+  }
+  return labels;
+}
+
 class CampaignImpressionRecord {
   final String id;
   final String? reqId;

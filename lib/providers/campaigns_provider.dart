@@ -156,6 +156,42 @@ final campaignScheduleProvider =
       }
     });
 
+/// Состав кампании: `inventory.id` → GID, оператор, адрес.
+///
+/// Нужен, чтобы подписать экраны без фотоотчётов: ответ про фотоотчёты знает
+/// только id поверхности. Сначала пробуем достать состав из уже загруженного
+/// детального ответа — тогда запросов не будет вовсе. Если сегменты пришли в
+/// нём только идентификаторами, добираем их по одному (так же, как это делает
+/// сервисный дашборд).
+final campaignInventoryProvider =
+    FutureProvider.family<Map<int, CampaignInventoryRef>, String>((
+      ref,
+      id,
+    ) async {
+      final campaign = await ref.watch(campaignDetailProvider(id).future);
+      final collected = <int, CampaignInventoryRef>{...campaign.inventories};
+      if (collected.isNotEmpty) return collected;
+
+      for (final segmentId in campaign.segmentIds) {
+        try {
+          final response = await _detailGate.run(
+            () => Omni360Client().dio.get(
+              '/api/v1.0/clients/campaigns/$id/segments/$segmentId',
+              queryParameters: {'withPlatformFee': false},
+            ),
+          );
+          final data = response.data;
+          if (data is Map<String, dynamic>) {
+            collected.addAll(CampaignInventoryRef.collectFrom(data));
+          }
+        } catch (e) {
+          // ignore: avoid_print
+          print('[inventory $id] сегмент $segmentId не загрузился: $e');
+        }
+      }
+      return collected;
+    });
+
 // --- Campaign stats via GET /impression-stats ---
 
 final campaignStatsProvider = FutureProvider.family<CampaignStats, String>((

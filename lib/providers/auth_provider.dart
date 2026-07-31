@@ -40,6 +40,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
     _ref.invalidate(campaignDetailProvider);
     _ref.invalidate(campaignStatsProvider);
     _ref.invalidate(campaignPhotoCoverageProvider);
+    _ref.invalidate(campaignInventoryProvider);
     _ref.invalidate(campaignScheduleProvider);
     _ref.invalidate(campaignAnalyticsProvider);
     _ref.invalidate(serviceDashboardProvider);

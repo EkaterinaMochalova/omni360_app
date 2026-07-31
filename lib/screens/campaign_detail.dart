@@ -128,6 +128,7 @@ class _CampaignDetailScreenState extends ConsumerState<CampaignDetailScreen> {
     final detail = ref.watch(campaignDetailProvider(campaignId));
     final stats = ref.watch(campaignStatsProvider(campaignId));
     final photoCoverage = ref.watch(campaignPhotoCoverageProvider(campaignId));
+    final inventory = ref.watch(campaignInventoryProvider(campaignId));
     final analytics = ref.watch(campaignAnalyticsProvider(campaignId));
     final analyticsController = ref.read(
       campaignAnalyticsProvider(campaignId).notifier,
@@ -208,8 +209,10 @@ class _CampaignDetailScreenState extends ConsumerState<CampaignDetailScreen> {
               child: _OverviewCard(
                 campaign: campaign,
                 coverage: photoCoverage,
-                // GID и адрес для списка экранов без ФО берутся отсюда: в
-                // ответе про фотоотчёты их нет.
+                // GID и оператор для списка экранов без ФО — из состава
+                // кампании: в ответе про фотоотчёты их нет. Выгрузка показов
+                // только дополняет подписи, если уже загружена.
+                inventory: inventory.asData?.value ?? const {},
                 records: analytics.allRecords.asData?.value ?? const [],
               ),
             ),
@@ -475,14 +478,18 @@ class _DatesCard extends StatelessWidget {
 class _PhotoCoverageCard extends StatelessWidget {
   final AsyncValue<CampaignPhotoCoverage> coverage;
 
-  /// Выгрузка показов за выбранный период — из неё берутся GID, адрес и
-  /// оператор для списка экранов без фотоотчётов: в ответе про фотоотчёты их
-  /// нет. Пустой список — подписи будут только внутренними именами.
+  /// Состав кампании — источник GID и оператора для списка экранов без
+  /// фотоотчётов: в ответе про фотоотчёты их нет.
+  final Map<int, CampaignInventoryRef> inventory;
+
+  /// Выгрузка показов, если она уже загружена, — только дополняет подписи
+  /// стороной и адресом конкретного показа. Пустой список ничего не ломает.
   final List<CampaignImpressionRecord> records;
 
   final bool bare;
   const _PhotoCoverageCard({
     required this.coverage,
+    this.inventory = const {},
     this.records = const [],
     this.bare = false,
   });
@@ -563,11 +570,11 @@ class _PhotoCoverageCard extends StatelessWidget {
                   alignment: Alignment.centerLeft,
                   child: TextButton.icon(
                     // Карту подписей строим по клику, а не на каждой отрисовке:
-                    // в выгрузке бывают десятки тысяч записей.
+                    // в выгрузке показов бывают десятки тысяч записей.
                     onPressed: () => _showMissingPhotoSides(
                       context,
                       value,
-                      surfaceLabels(records),
+                      surfaceLabels(inventory, records),
                     ),
                     style: TextButton.styleFrom(
                       padding: const EdgeInsets.symmetric(horizontal: 4),
@@ -591,34 +598,46 @@ class _PhotoCoverageCard extends StatelessWidget {
   }
 }
 
-/// Подписи поверхности: GID, сторона, адрес, оператор, город.
-typedef SurfaceLabel = ({
-  String gid,
-  String side,
-  String address,
-  String operatorName,
-  String city,
-});
-
-/// Карта `inventory.id` → подписи поверхности, собранная по выгрузке показов.
+/// Подписи поверхностей для списка экранов без фотоотчётов.
 ///
-/// Про фотоотчёты бэкенд отдаёт только `inventory.id` и внутреннее имя вида
-/// `Estetika_5th_Saratov_Sokolovaya/Tankistov` — ни GID, ни адреса, ни
-/// оператора там нет. Зато всё это есть в каждой записи о показе, и связать
-/// два ответа можно по id поверхности.
-Map<int, SurfaceLabel> surfaceLabels(List<CampaignImpressionRecord> records) {
-  final labels = <int, SurfaceLabel>{};
-  for (final record in records) {
-    final id = record.inventoryId;
-    if (id == null || labels.containsKey(id)) continue;
-    labels[id] = (
-      gid: record.inventoryGid ?? '',
-      side: record.side ?? '',
-      address: record.address ?? '',
-      operatorName: record.displayOwnerName ?? '',
-      city: record.city ?? '',
+/// Основной источник — состав кампании из детального ответа: он уже загружен и
+/// закеширован, так что GID и оператор достаются без единого запроса и не
+/// зависят от выбранного периода. Выгрузка показов, если она уже есть на руках,
+/// только дополняет: там ещё указаны сторона и адрес конкретного показа.
+Map<int, SurfaceLabel> surfaceLabels(
+  Map<int, CampaignInventoryRef> inventory,
+  List<CampaignImpressionRecord> records,
+) {
+  final labels = <int, SurfaceLabel>{
+    for (final ref in inventory.values)
+      ref.id: (
+        gid: ref.gid,
+        side: '',
+        address: ref.address,
+        operatorName: ref.operatorName,
+        city: ref.city,
+      ),
+  };
+
+  // Дополняем пустые поля тем, что есть в показах; уже известное не
+  // перезаписываем — состав кампании точнее.
+  for (final entry in surfaceLabelsFromRecords(records).entries) {
+    final known = labels[entry.key];
+    if (known == null) {
+      labels[entry.key] = entry.value;
+      continue;
+    }
+    labels[entry.key] = (
+      gid: known.gid.isNotEmpty ? known.gid : entry.value.gid,
+      side: known.side.isNotEmpty ? known.side : entry.value.side,
+      address: known.address.isNotEmpty ? known.address : entry.value.address,
+      operatorName: known.operatorName.isNotEmpty
+          ? known.operatorName
+          : entry.value.operatorName,
+      city: known.city.isNotEmpty ? known.city : entry.value.city,
     );
   }
+
   return labels;
 }
 
@@ -657,7 +676,10 @@ void _showMissingPhotoSides(
     return parts.isEmpty ? side.name : parts.join(' · ');
   }
 
-  final withoutLabels = missing.where((side) => labelOf(side) == null).length;
+  final withoutLabels = missing.where((side) {
+    final label = labelOf(side);
+    return label == null || label.gid.isEmpty;
+  }).length;
 
   showDialog<void>(
     context: context,
@@ -733,15 +755,14 @@ void _showMissingPhotoSides(
                 ),
               ),
             ),
-            // Подписи есть только для поверхностей, попавших в выгрузку за
-            // выбранный период, — процент покрытия при этом считается за всю
-            // кампанию. Честно говорим, чего не хватает и как дополнить.
+            // Обычно не срабатывает: состав кампании приходит вместе с самой
+            // кампанией. Но если поверхности в нём не окажется — лучше сказать
+            // об этом, чем молча показать внутреннее имя как GID.
             if (withoutLabels > 0) ...[
               const SizedBox(height: 12),
               Text(
-                'Для $withoutLabels из ${missing.length} экранов GID и адрес '
-                'взять негде: их показов нет в выгрузке за выбранный период. '
-                'Включите «Весь период» — подписи заполнятся.',
+                'Для $withoutLabels из ${missing.length} экранов GID не нашёлся '
+                'в составе кампании — показано внутреннее имя поверхности.',
                 style: const TextStyle(color: Color(0xFFE65100), fontSize: 11),
               ),
             ],
@@ -1096,12 +1117,15 @@ class _OverviewCard extends StatelessWidget {
   final Campaign campaign;
   final AsyncValue<CampaignPhotoCoverage> coverage;
 
-  /// Выгрузка показов — для подписей в списке экранов без фотоотчётов.
+  /// Состав кампании и выгрузка показов — для подписей в списке экранов без
+  /// фотоотчётов.
+  final Map<int, CampaignInventoryRef> inventory;
   final List<CampaignImpressionRecord> records;
 
   const _OverviewCard({
     required this.campaign,
     required this.coverage,
+    this.inventory = const {},
     this.records = const [],
   });
 
@@ -1119,6 +1143,7 @@ class _OverviewCard extends StatelessWidget {
           const SizedBox(height: 10),
           _PhotoCoverageCard(
             coverage: coverage,
+            inventory: inventory,
             records: records,
             bare: true,
           ),
