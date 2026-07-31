@@ -408,10 +408,16 @@ class CampaignAnalyticsDashboardPrefs {
   final bool showSummary;
   final bool showStateBreakdown;
   final bool showFailureBreakdown;
+  /// Полный список запросов. По умолчанию выключен: блок тяжёлый (страница за
+  /// страницей по всем показам) и в работе нужен редко.
   final bool showRequestTable;
   final bool showDailyBreakdown;
   final bool showBidReport;
   final bool showOperatorReport;
+
+  /// Текстовая справка по кампании с рекомендациями — чтобы скопировать и
+  /// отправить клиенту. По умолчанию выключена: нужна не каждый раз.
+  final bool showRecommendations;
 
   const CampaignAnalyticsDashboardPrefs({
     required this.showSummary,
@@ -421,16 +427,18 @@ class CampaignAnalyticsDashboardPrefs {
     required this.showDailyBreakdown,
     required this.showBidReport,
     required this.showOperatorReport,
+    required this.showRecommendations,
   });
 
   const CampaignAnalyticsDashboardPrefs.defaults()
     : showSummary = true,
       showStateBreakdown = true,
       showFailureBreakdown = true,
-      showRequestTable = true,
+      showRequestTable = false,
       showDailyBreakdown = true,
       showBidReport = true,
-      showOperatorReport = true;
+      showOperatorReport = true,
+      showRecommendations = false;
 
   CampaignAnalyticsDashboardPrefs copyWith({
     bool? showSummary,
@@ -440,6 +448,7 @@ class CampaignAnalyticsDashboardPrefs {
     bool? showDailyBreakdown,
     bool? showBidReport,
     bool? showOperatorReport,
+    bool? showRecommendations,
   }) {
     return CampaignAnalyticsDashboardPrefs(
       showSummary: showSummary ?? this.showSummary,
@@ -449,6 +458,7 @@ class CampaignAnalyticsDashboardPrefs {
       showDailyBreakdown: showDailyBreakdown ?? this.showDailyBreakdown,
       showBidReport: showBidReport ?? this.showBidReport,
       showOperatorReport: showOperatorReport ?? this.showOperatorReport,
+      showRecommendations: showRecommendations ?? this.showRecommendations,
     );
   }
 
@@ -460,6 +470,7 @@ class CampaignAnalyticsDashboardPrefs {
     'showDailyBreakdown': showDailyBreakdown,
     'showBidReport': showBidReport,
     'showOperatorReport': showOperatorReport,
+    'showRecommendations': showRecommendations,
   };
 
   factory CampaignAnalyticsDashboardPrefs.fromJson(Map<String, dynamic> json) {
@@ -467,10 +478,11 @@ class CampaignAnalyticsDashboardPrefs {
       showSummary: json['showSummary'] as bool? ?? true,
       showStateBreakdown: json['showStateBreakdown'] as bool? ?? true,
       showFailureBreakdown: json['showFailureBreakdown'] as bool? ?? true,
-      showRequestTable: json['showRequestTable'] as bool? ?? true,
+      showRequestTable: json['showRequestTable'] as bool? ?? false,
       showDailyBreakdown: json['showDailyBreakdown'] as bool? ?? true,
       showBidReport: json['showBidReport'] as bool? ?? true,
       showOperatorReport: json['showOperatorReport'] as bool? ?? true,
+      showRecommendations: json['showRecommendations'] as bool? ?? false,
     );
   }
 }

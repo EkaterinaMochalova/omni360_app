@@ -12,6 +12,7 @@ import '../services/app_notifications_service.dart';
 import '../services/local_order_store.dart';
 import '../utils/campaign_notifications.dart';
 import '../utils/pace_alerts.dart';
+import '../utils/pace_colors.dart';
 import '../widgets/app_sidebar.dart';
 import '../widgets/loading_placeholders.dart';
 import '../widgets/reorderable_flex_wrap.dart';
@@ -961,7 +962,7 @@ class _CampaignCard extends ConsumerWidget {
               ? cardStats.factBudget
               : null);
 
-    final (statusBg, statusFg) = _statusColors(c.status);
+    final (statusBg, statusFg) = campaignStatusPalette(c.statusKind);
     final ratio = (effectiveSpent != null && c.budget != null && c.budget! > 0)
         ? (effectiveSpent / c.budget!).clamp(0.0, 1.0)
         : null;
@@ -1256,25 +1257,7 @@ class _CampaignCard extends ConsumerWidget {
     );
     if (pace.planToNow <= 0) return kAccent;
 
-    final ratio = pace.pacePctNow;
-    if (ratio > 1.1) return Colors.redAccent; // перерасход
-    if (ratio >= 0.9) return const Color(0xFF43A047); // по плану
-    if (ratio >= 0.7) return const Color(0xFFF9A825); // подотстаём
-    return Colors.redAccent; // сильно отстаём
-  }
-
-  static (Color, Color) _statusColors(String status) {
-    return switch (status.toUpperCase()) {
-      'RUNNING' ||
-      'ACTIVE' => (const Color(0xFFE8F5E9), const Color(0xFF2E7D32)),
-      'PAUSED' => (const Color(0xFFFFF3E0), const Color(0xFFE65100)),
-      'NEW' => (const Color(0xFFE3F2FD), const Color(0xFF1565C0)),
-      'OFF_SCHEDULE' => (const Color(0xFFFFFDE7), const Color(0xFFF9A825)),
-      'COMPLETED' => (const Color(0xFFF5F5F5), const Color(0xFF757575)),
-      'BUDGET_EXHAUSTED' ||
-      'STOPPED' => (const Color(0xFFFFEBEE), const Color(0xFFC62828)),
-      _ => (const Color(0xFFF5F5F5), const Color(0xFF757575)),
-    };
+    return paceColor(pace.pacePctNow);
   }
 }
 

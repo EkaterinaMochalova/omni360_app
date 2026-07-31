@@ -10,13 +10,16 @@ import '../models/campaign_analytics.dart';
 import '../models/loss_report.dart';
 import '../models/pace_summary.dart';
 import 'campaign_analytics_screen.dart';
+import '../widgets/campaign_recommendations.dart';
 import '../widgets/stats_chart.dart';
 import '../utils/pace_alerts.dart';
+import '../utils/pace_colors.dart';
 import '../utils/broadcast_schedule.dart';
 import '../widgets/loading_placeholders.dart';
 
 const _kDetailBlockIds = [
   'overview',
+  'recommendations',
   'planFact',
   'limits',
   'chart',
@@ -107,6 +110,42 @@ class _CampaignDetailScreenState extends ConsumerState<CampaignDetailScreen> {
     final from = DateTime(start.year, start.month, start.day);
     if (!to.isAfter(from)) return null;
     return (from, to);
+  }
+
+  /// Предупреждение перед выгрузкой всего периода.
+  Future<bool> _confirmFullPeriod(BuildContext context) async {
+    final go = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: Colors.white,
+        title: const Text(
+          'Загрузить весь период?',
+          style: TextStyle(
+            color: kTextPrimary,
+            fontSize: 16,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        content: const Text(
+          'Отчёты считаются по всем показам за весь срок кампании — '
+          'это десятки тысяч записей и несколько минут ожидания на крупных '
+          'кампаниях. Дашборд можно листать, пока идёт загрузка.',
+          style: TextStyle(color: kTextSecondary, fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            style: FilledButton.styleFrom(backgroundColor: kAccent),
+            child: const Text('Загрузить'),
+          ),
+        ],
+      ),
+    );
+    return go ?? false;
   }
 
   DateTimeRange? _initialRange(
@@ -200,6 +239,12 @@ class _CampaignDetailScreenState extends ConsumerState<CampaignDetailScreen> {
           ),
         ),
         data: (campaign) {
+          // Отчёт по отклонениям считается по всей выгрузке — на десятках тысяч
+          // записей это ощутимая работа, поэтому один раз на отрисовку, а не по
+          // разу на каждый блок, который его просит.
+          final records = analytics.allRecords.asData?.value ?? const [];
+          final lossReport = LossReportBuilder.build(records);
+
           final blocksById = <String, DashboardBlock>{
             // Статус, даты, фотоотчёты и сводка по запросам — один обзорный
             // блок: по отдельности это четыре почти пустые карточки.
@@ -213,9 +258,29 @@ class _CampaignDetailScreenState extends ConsumerState<CampaignDetailScreen> {
                 // кампании: в ответе про фотоотчёты их нет. Выгрузка показов
                 // только дополняет подписи, если уже загружена.
                 inventory: inventory.asData?.value ?? const {},
-                records: analytics.allRecords.asData?.value ?? const [],
+                records: records,
               ),
             ),
+            // Текстовая справка для клиента — по умолчанию выключена в
+            // настройках дашборда: нужна не каждый раз.
+            if (analytics.prefs.showRecommendations)
+              'recommendations': (
+                id: 'recommendations',
+                isWide: true,
+                child: CampaignRecommendationsCard(
+                  campaign: campaign,
+                  stats: stats.asData?.value,
+                  coverage: photoCoverage.asData?.value,
+                  surfaceLabels: surfaceLabels(
+                    inventory.asData?.value ?? const {},
+                    records,
+                  ),
+                  lossReport: lossReport,
+                  periodStart: analytics.query.start,
+                  periodEnd: analytics.query.end,
+                  recordsLoading: analytics.allRecords.isLoading,
+                ),
+              ),
             'planFact': (
               id: 'planFact',
               isWide: true,
@@ -268,8 +333,13 @@ class _CampaignDetailScreenState extends ConsumerState<CampaignDetailScreen> {
                 },
                 onSetFullPeriod: _fullPeriodOf(campaign) == null
                     ? null
-                    : () {
+                    : () async {
                         final range = _fullPeriodOf(campaign)!;
+                        // Весь период выгружается целиком, без предела по
+                        // страницам, — на крупных кампаниях это минуты.
+                        // Спрашиваем заранее, чтобы это не было сюрпризом.
+                        final go = await _confirmFullPeriod(context);
+                        if (!go) return;
                         analyticsController.setRange(range.$1, range.$2);
                       },
                 onRefresh: analyticsController.fetchImpressions,
@@ -348,9 +418,7 @@ class _CampaignDetailScreenState extends ConsumerState<CampaignDetailScreen> {
                   aggregate:
                       analytics.aggregate.asData?.value ??
                       CampaignAnalyticsAggregate.empty(),
-                  lossReport: LossReportBuilder.build(
-                    analytics.allRecords.asData?.value ?? const [],
-                  ),
+                  lossReport: lossReport,
                   onPageChange: analyticsController.setPage,
                   onLoadAllRecords: analyticsController.loadAllRecords,
                   extraBlocks: blocksById,
@@ -374,7 +442,7 @@ class _StatusCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final fg = _statusStyle(campaign.status).$3;
+    final (bg, fg) = campaignStatusPalette(campaign.statusKind);
     final label = campaign.displayStatus;
     return _Card(
       bare: bare,
@@ -386,12 +454,19 @@ class _StatusCard extends StatelessWidget {
             decoration: BoxDecoration(color: fg, shape: BoxShape.circle),
           ),
           const SizedBox(width: 10),
-          Text(
-            label,
-            style: TextStyle(
-              color: fg,
-              fontWeight: FontWeight.w600,
-              fontSize: 14,
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+            decoration: BoxDecoration(
+              color: bg,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Text(
+              label,
+              style: TextStyle(
+                color: fg,
+                fontWeight: FontWeight.w600,
+                fontSize: 13,
+              ),
             ),
           ),
           const Spacer(),
@@ -412,33 +487,6 @@ class _StatusCard extends StatelessWidget {
     );
   }
 
-  static (String, Color, Color) _statusStyle(String status) => switch (status
-      .toUpperCase()) {
-    'RUNNING' ||
-    'ACTIVE' => ('Активна', const Color(0xFFE8F5E9), const Color(0xFF2E7D32)),
-    'PAUSED' => ('На паузе', const Color(0xFFFFF3E0), const Color(0xFFE65100)),
-    'NEW' => ('Новая', const Color(0xFFE3F2FD), const Color(0xFF1565C0)),
-    'OFF_SCHEDULE' => (
-      'Не в графике',
-      const Color(0xFFFFFDE7),
-      const Color(0xFFF9A825),
-    ),
-    'BUDGET_EXHAUSTED' || 'STOPPED' => (
-      'Бюджет исчерпан',
-      const Color(0xFFFFEBEE),
-      const Color(0xFFC62828),
-    ),
-    'COMPLETED' => (
-      'Завершена',
-      const Color(0xFFF5F5F5),
-      const Color(0xFF757575),
-    ),
-    _ => (
-      status.isNotEmpty ? status : 'Неизвестно',
-      const Color(0xFFF5F5F5),
-      const Color(0xFF757575),
-    ),
-  };
 }
 
 // ── Dates card ────────────────────────────────────────────────────────────────
@@ -1010,14 +1058,7 @@ class _PlanFactRow extends StatelessWidget {
   /// этого кампания, освоившая 35% бюджета к концу срока, выглядела здоровой,
   /// а почти выполнившая план — красной. Зелёный теперь означает «идём по
   /// плану», а не «мало потратили».
-  Color get _barColor {
-    final value = ratio;
-    if (value == null) return kAccent;
-    if (value > 1.1) return Colors.redAccent; // перерасход
-    if (value >= 0.9) return const Color(0xFF43A047); // по плану
-    if (value >= 0.7) return const Color(0xFFF9A825); // подотстаём
-    return Colors.redAccent; // сильно отстаём
-  }
+  Color get _barColor => paceColor(ratio);
 
   @override
   Widget build(BuildContext context) {
@@ -1344,7 +1385,9 @@ class _LimitsCard extends StatelessWidget {
                     'Выполнение',
                     '${(fact / recommended * 100).toStringAsFixed(0)}% '
                         'от рекомендуемого',
-                    fact > recommended ? Colors.red : const Color(0xFF2E7D32),
+                    // Та же шкала, что у остальных блоков: любое превышение
+                    // здесь красилось красным, а отставание до 70% — зелёным.
+                    paceColor(fact / recommended),
                   ),
               ],
             ),

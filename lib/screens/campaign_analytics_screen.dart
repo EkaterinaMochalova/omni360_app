@@ -105,6 +105,13 @@ void openDashboardSettings(
                 ),
               ),
               _DashboardToggleTile(
+                title: 'Рекомендации для клиента',
+                value: state.prefs.showRecommendations,
+                onChanged: (value) => controller.updatePrefs(
+                  state.prefs.copyWith(showRecommendations: value),
+                ),
+              ),
+              _DashboardToggleTile(
                 title: 'Список запросов',
                 value: state.prefs.showRequestTable,
                 onChanged: (value) => controller.updatePrefs(
@@ -526,7 +533,9 @@ Widget _partialNotice(int loadedCount, VoidCallback? onLoadAll) {
       children: [
         Expanded(
           child: Text(
-            'Выгрузка неполная: посчитано по $loadedCount показам.',
+            // Предела по страницам больше нет, так что неполная выгрузка теперь
+            // означает только одно: часть страниц не дошла с бэкенда.
+            'Часть страниц не загрузилась: посчитано по $loadedCount показам.',
             style: const TextStyle(color: Color(0xFFE65100), fontSize: 11),
           ),
         ),
@@ -539,7 +548,7 @@ Widget _partialNotice(int loadedCount, VoidCallback? onLoadAll) {
               foregroundColor: const Color(0xFFE65100),
             ),
             child: const Text(
-              'Загрузить весь период',
+              'Загрузить заново',
               style: TextStyle(fontSize: 11),
             ),
           ),

@@ -62,6 +62,17 @@ class TimeSlot {
   }
 }
 
+/// Смысловая категория статуса кампании — от неё зависят подпись и цвет.
+enum CampaignStatusKind {
+  active,
+  paused,
+  fresh,
+  offSchedule,
+  exhausted,
+  completed,
+  unknown,
+}
+
 /// Рекламная поверхность из состава кампании: GID, оператор, адрес.
 ///
 /// Ответ `impression-inventory-stats`, по которому считаются фотоотчёты, знает
@@ -551,6 +562,25 @@ class Campaign {
         s == 'outofschedule' ||
         s.contains('schedule') ||
         s.contains('график');
+  }
+
+  /// Смысловая категория статуса — одна для подписи и для цвета.
+  ///
+  /// Раньше цвет плашки выбирался отдельным switch'ем по сырому статусу, а
+  /// подпись — по признакам ниже. Бэкенд присылает не только RUNNING (бывает
+  /// STARTED, LIVE, «Активна»), и на таких кампаниях плашка горела серым
+  /// «Активна»: подпись из одного места, цвет из другого.
+  CampaignStatusKind get statusKind {
+    final s = status.toUpperCase();
+    if (s == 'NEW') return CampaignStatusKind.fresh;
+    if (s == 'COMPLETED') return CampaignStatusKind.completed;
+    if (s == 'BUDGET_EXHAUSTED' || s == 'STOPPED') {
+      return CampaignStatusKind.exhausted;
+    }
+    if (isActive) return CampaignStatusKind.active;
+    if (isPaused) return CampaignStatusKind.paused;
+    if (isNotOnSchedule) return CampaignStatusKind.offSchedule;
+    return CampaignStatusKind.unknown;
   }
 
   /// Человекочитаемый статус для UI
