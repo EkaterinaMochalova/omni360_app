@@ -385,6 +385,11 @@ class AnalyticsToolbar extends StatelessWidget {
 const _kDashboardOrderKey = 'omni360-dashboard-order';
 const _kDashboardWidthsKey = 'omni360-dashboard-widths';
 const _kDashboardHeightsKey = 'omni360-dashboard-heights';
+/// Блок с мини-игрой на время загрузки. Живёт вне сохранённого порядка: он
+/// появляется и исчезает сам, и всегда стоит первым — досматривать партию,
+/// пролистывая до неё дашборд, было бы странно.
+const kLoadingGameBlockId = 'loadingGame';
+
 const kAnalyticsBlockIds = [
   'states',
   'requests',
@@ -657,7 +662,12 @@ class _CampaignDashboardBodyState extends State<CampaignDashboardBody> {
   }
 
   void _onReorder(List<DashboardBlock> newOrder) {
-    final ids = newOrder.map((b) => b.id).toList();
+    // Игра в порядок блоков не сохраняется: она временная, а запись о ней
+    // осталась бы в настройках навсегда.
+    final ids = newOrder
+        .map((b) => b.id)
+        .where((id) => id != kLoadingGameBlockId)
+        .toList();
     setState(() => _order = ids);
     LocalOrderStore.instance.saveOrder(_kDashboardOrderKey, ids);
   }
@@ -830,12 +840,18 @@ class _CampaignDashboardBodyState extends State<CampaignDashboardBody> {
     };
 
     final blocks = [
+      // Игра на время загрузки — всегда первой плиткой, минуя сохранённый
+      // порядок: иначе она оказывалась бы в конце сетки.
+      if (blocksById.containsKey(kLoadingGameBlockId))
+        blocksById[kLoadingGameBlockId]!,
       for (final id in _order)
-        if (blocksById.containsKey(id)) blocksById[id]!,
+        if (id != kLoadingGameBlockId && blocksById.containsKey(id))
+          blocksById[id]!,
       // Блоки, которых не было в сохранённом порядке (новые или добавленные
       // карточкой кампании), иначе бы они просто не отрисовались.
       for (final entry in blocksById.entries)
-        if (!_order.contains(entry.key)) entry.value,
+        if (entry.key != kLoadingGameBlockId && !_order.contains(entry.key))
+          entry.value,
     ];
 
     return SingleChildScrollView(

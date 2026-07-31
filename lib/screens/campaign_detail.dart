@@ -11,6 +11,7 @@ import '../models/loss_report.dart';
 import '../models/pace_summary.dart';
 import 'campaign_analytics_screen.dart';
 import '../widgets/campaign_recommendations.dart';
+import '../widgets/loading_games.dart';
 import '../widgets/stats_chart.dart';
 import '../utils/pace_alerts.dart';
 import '../utils/pace_colors.dart';
@@ -246,6 +247,15 @@ class _CampaignDetailScreenState extends ConsumerState<CampaignDetailScreen> {
           final lossReport = LossReportBuilder.build(records);
 
           final blocksById = <String, DashboardBlock>{
+            // Пока считается выгрузка показов (на «всём периоде» это минуты),
+            // верхнюю плитку занимает мини-игра. Блок существует только во
+            // время загрузки и в сохранённый порядок не попадает.
+            if (analytics.allRecords.isLoading)
+              kLoadingGameBlockId: (
+                id: kLoadingGameBlockId,
+                isWide: false,
+                child: const LoadingGameCard(key: ValueKey('loading-game')),
+              ),
             // Статус, даты, фотоотчёты и сводка по запросам — один обзорный
             // блок: по отдельности это четыре почти пустые карточки.
             'overview': (
