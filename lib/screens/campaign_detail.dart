@@ -276,6 +276,11 @@ class _CampaignDetailScreenState extends ConsumerState<CampaignDetailScreen> {
                     records,
                   ),
                   lossReport: lossReport,
+                  // Ошибки операторов попадают в письмо только если их доля от
+                  // всех попыток выхода выше порога.
+                  totalRequests:
+                      analytics.aggregate.asData?.value.totalRequests ??
+                      records.length,
                   periodStart: analytics.query.start,
                   periodEnd: analytics.query.end,
                   recordsLoading: analytics.allRecords.isLoading,
