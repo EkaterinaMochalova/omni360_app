@@ -135,7 +135,7 @@ class CampaignInventoryRef {
         ], owner);
         final nextCity = firstText([current['city']], city);
 
-        final id = _toInt(current['id']);
+        final id = Campaign._toInt(current['id']);
         final gid = current['gid']?.toString().trim() ?? '';
         // Корневой узел — сама кампания, у неё тоже есть id и gid.
         if (!root && id != null && gid.isNotEmpty) {
