@@ -15,6 +15,60 @@ class CampaignsNotifier extends StateNotifier<AsyncValue<List<Campaign>>> {
     fetch();
   }
 
+  /// Размеры страницы по убыванию. Прокси отдаёт 502, когда страница не
+  /// успевает посчитаться за отведённое функции время, а у master-аккаунтов
+  /// кампаний на порядок больше, чем у клиентских, — там и 50 за раз бывает
+  /// много. Тогда просим меньше: страниц больше, зато они доходят.
+  static const _pageSizeLadder = [50, 25, 10];
+
+  /// Предел на число страниц — предохранитель от бесконечного перебора, если
+  /// бэкенд отдаст неправдоподобный totalPages.
+  static const _maxPages = 300;
+
+  /// Одна страница списка с повторами на временных сбоях.
+  ///
+  /// Возвращает null, если страница так и не пришла: список из-за одной
+  /// страницы целиком терять незачем. Ошибки доступа (401/403) прокидываем —
+  /// это не временный сбой, и молчать о нём нельзя.
+  Future<Response?> _fetchCampaignsPage(int page, int size) async {
+    const backoff = [
+      Duration(milliseconds: 500),
+      Duration(milliseconds: 1500),
+      Duration(seconds: 4),
+    ];
+
+    for (var attempt = 0; attempt <= backoff.length; attempt++) {
+      try {
+        return await _client.dio.get(
+          '/api/v1.0/clients/campaigns',
+          queryParameters: {'page': page, 'size': size},
+        );
+      } on DioException catch (e) {
+        final status = e.response?.statusCode ?? 0;
+        if (status == 401 || status == 403) rethrow;
+
+        final temporary =
+            status == 502 ||
+            status == 503 ||
+            status == 504 ||
+            e.type == DioExceptionType.connectionTimeout ||
+            e.type == DioExceptionType.receiveTimeout;
+        if (!temporary) rethrow;
+
+        if (attempt == backoff.length) {
+          // ignore: avoid_print
+          print(
+            '[campaigns] страница $page (по $size) не пришла: '
+            'HTTP $status ${e.type}',
+          );
+          return null;
+        }
+        await Future<void>.delayed(backoff[attempt]);
+      }
+    }
+    return null;
+  }
+
   Future<List<Campaign>?> fetch({bool silent = false}) async {
     final previous = state.asData?.value;
     if (!silent || previous == null) {
@@ -22,18 +76,38 @@ class CampaignsNotifier extends StateNotifier<AsyncValue<List<Campaign>>> {
     }
 
     try {
-      final all = <dynamic>[];
-      int page = 0;
-      const pageSize = 50;
-      int totalPages = 1;
+      final campaigns = <Campaign>[];
+      var pageSize = _pageSizeLadder.first;
+      var page = 0;
+      var totalPages = 1;
 
       do {
-        final response = await _client.dio.get(
-          '/api/v1.0/clients/campaigns',
-          queryParameters: {'page': page, 'size': pageSize},
-        );
-        final data = response.data;
+        Response? response;
+        // Размер подбираем на первой странице, дальше держим найденный.
+        for (final size in page == 0 ? _pageSizeLadder : [pageSize]) {
+          response = await _fetchCampaignsPage(page, size);
+          if (response != null) {
+            pageSize = size;
+            break;
+          }
+        }
 
+        if (response == null) {
+          if (campaigns.isEmpty) {
+            throw Exception(
+              'Бэкенд не отдал список кампаний (502). Обычно это перегрузка — '
+              'попробуйте повторить через минуту.',
+            );
+          }
+          // ignore: avoid_print
+          print(
+            '[campaigns] список неполный: страница $page не пришла, '
+            'показываем ${campaigns.length} кампаний',
+          );
+          break;
+        }
+
+        final data = response.data;
         List<dynamic> chunk;
         if (data is List) {
           chunk = data;
@@ -49,12 +123,18 @@ class CampaignsNotifier extends StateNotifier<AsyncValue<List<Campaign>>> {
           totalPages = 1;
         }
 
-        all.addAll(chunk);
+        campaigns.addAll(
+          chunk.map((e) => Campaign.fromJson(e as Map<String, dynamic>)),
+        );
+
+        // Отдаём по мере готовности: на аккаунтах с сотнями кампаний ждать
+        // все страницы, глядя на крутилку, незачем.
+        if (!silent) {
+          state = AsyncValue.data(List<Campaign>.from(campaigns));
+        }
         page++;
-      } while (page < totalPages);
-      final campaigns = all
-          .map((e) => Campaign.fromJson(e as Map<String, dynamic>))
-          .toList();
+      } while (page < totalPages && page < _maxPages);
+
       state = AsyncValue.data(campaigns);
       return campaigns;
     } catch (e, st) {
