@@ -167,6 +167,10 @@ class CampaignAnalyticsController
   /// срезы прошлой выгрузки перестают попадать в состояние.
   int _dumpGeneration = 0;
 
+  /// Пользователь остановил выгрузку. Ждать её конца, глядя на счётчик,
+  /// который еле двигается, — не то, на что стоит тратить час.
+  bool _dumpCancelled = false;
+
   final FlutterSecureStorage _storage = const FlutterSecureStorage();
 
   String get _prefsKey => 'campaign_analytics_dashboard_prefs';
@@ -206,8 +210,36 @@ class CampaignAnalyticsController
     }
   }
 
+  /// Сколько показов в периоде. null — узнать не удалось.
+  ///
+  /// Один лёгкий запрос на одну запись: `totalElements` в ответе есть всегда.
+  /// Нужен, чтобы про объём спрашивать с числом на руках, а не «может быть,
+  /// это займёт минуты»: 300 тысяч показов — это часы, и знать это лучше до
+  /// начала, а не через час ожидания.
+  Future<int?> countImpressions(DateTime start, DateTime end) async {
+    try {
+      final response = await _fetchImpressionsWithFallback(
+        state.query.copyWith(start: start, end: end, page: 0, size: 1),
+      );
+      return CampaignImpressionsPage.fromJson(
+        response.data as Map<String, dynamic>,
+      ).totalElements;
+    } catch (e) {
+      // ignore: avoid_print
+      print('[analytics] объём периода не посчитался: $e');
+      return null;
+    }
+  }
+
+  /// Остановить выгрузку показов. Собранное остаётся, отчёты по нему считаются.
+  void cancelDump() {
+    if (!state.dumpInProgress) return;
+    _dumpCancelled = true;
+  }
+
   Future<void> fetchImpressions() async {
     _dumpGeneration++;
+    _dumpCancelled = false;
     state = state.copyWith(
       impressions: const AsyncValue.loading(),
       aggregate: const AsyncValue.loading(),
@@ -312,6 +344,7 @@ class CampaignAnalyticsController
   /// Повторить выгрузку показов — когда часть страниц не дошла.
   Future<void> loadAllRecords() async {
     _dumpGeneration++;
+    _dumpCancelled = false;
     state = state.copyWith(
       aggregate: const AsyncValue.loading(),
       allRecords: const AsyncValue.loading(),
@@ -382,9 +415,18 @@ class CampaignAnalyticsController
     await _savePrefs(prefs);
   }
 
+  /// [retriesOn5xx] — сколько раз повторять запрос при 502/503/504.
+  ///
+  /// Для одиночных запросов повторов не жалко, а внутри полной выгрузки они
+  /// складываются с дроблением страниц: 4 повтора × 2 половинки × ещё раз — это
+  /// до 28 запросов на одну безнадёжную страницу. На выгрузке в 600 страниц
+  /// такая арифметика превращается в лавину, которая добивает и без того
+  /// перегруженный бэкенд. Поэтому оттуда приходит 1: повтором там служит само
+  /// дробление.
   Future<dynamic> _fetchImpressionsWithFallback(
-    CampaignAnalyticsQuery query,
-  ) async {
+    CampaignAnalyticsQuery query, {
+    int retriesOn5xx = 3,
+  }) async {
     final baseParams = <String, dynamic>{
       'page': query.page,
       'size': query.size,
@@ -445,7 +487,7 @@ class CampaignAnalyticsController
         Duration(milliseconds: 1500),
         Duration(seconds: 4),
       ];
-      final maxAttempts = backoff.length + 1;
+      final maxAttempts = min(retriesOn5xx, backoff.length) + 1;
       for (var attempt = 0; attempt < maxAttempts; attempt++) {
         try {
           return await _client.dio.get(
@@ -498,12 +540,13 @@ class CampaignAnalyticsController
     try {
       final response = await _fetchImpressionsWithFallback(
         baseQuery.copyWith(page: pageIndex, size: size),
+        retriesOn5xx: 1,
       );
       return CampaignImpressionsPage.fromJson(
         response.data as Map<String, dynamic>,
       ).content;
     } catch (e) {
-      if (depth >= 2) {
+      if (_dumpCancelled || depth >= 2) {
         // ignore: avoid_print
         print('[analytics] страница $pageIndex (по $size) не загрузилась: $e');
         return null;
@@ -584,12 +627,21 @@ class CampaignAnalyticsController
     }
 
     var lastPublish = DateTime.now();
+    var publishAt = 5000;
     void publish({bool force = false}) {
       if (onProgress == null) return;
+      final count = loaded.values.fold<int>(0, (sum, page) => sum + page.length);
       final now = DateTime.now();
-      if (!force && now.difference(lastPublish) < const Duration(seconds: 4)) {
+      // Промежуточный срез — это пересборка всех отчётов по всем накопленным
+      // записям. На 300 тысячах она уже не бесплатна и отнимает время у самого
+      // разбора ответов, поэтому чем больше данных, тем реже обновления:
+      // порог растёт, а не остаётся раз в несколько секунд.
+      if (!force &&
+          (count < publishAt ||
+              now.difference(lastPublish) < const Duration(seconds: 4))) {
         return;
       }
+      publishAt = (count * 1.6).round();
       lastPublish = now;
       onProgress(flatten(), expected);
     }
@@ -599,10 +651,16 @@ class CampaignAnalyticsController
     // повтором, а снижением давления, поэтому после сбоя пачка сужается и
     // расширяется обратно, только если пошло гладко.
     const maxChunk = 6;
+    // Предохранитель. Если бэкенд стабильно не отдаёт страницы, продолжать
+    // бессмысленно: на 600 страницах перебор занимает часы, а результат тот же.
+    // Лучше остановиться, отдать что есть и сказать об этом.
+    const maxFailedPages = 24;
     var chunkSize = maxChunk;
     var next = 1;
+    var aborted = false;
 
     while (next < pagesToLoad) {
+      if (_dumpCancelled) break;
       final end = min(next + chunkSize, pagesToLoad);
       final results = await Future.wait([
         for (var pageIndex = next; pageIndex < end; pageIndex++)
@@ -622,6 +680,16 @@ class CampaignAnalyticsController
       }
       next = end;
 
+      if (failed.length >= maxFailedPages) {
+        aborted = true;
+        // ignore: avoid_print
+        print(
+          '[analytics] бэкенд не отдаёт страницы (${failed.length} подряд '
+          'неудачных), выгрузка остановлена на ${flatten().length} записях',
+        );
+        break;
+      }
+
       if (failures > 0) {
         chunkSize = max(2, chunkSize - 2);
         await Future<void>.delayed(const Duration(seconds: 2));
@@ -634,29 +702,41 @@ class CampaignAnalyticsController
     }
 
     final stillFailed = <int>[];
-    for (final pageIndex in failed) {
-      // По одной и с паузой: в общей пачке эти страницы падали именно из-за
-      // одновременности.
-      await Future<void>.delayed(const Duration(milliseconds: 800));
-      final records = await _fetchPageSplitting(baseQuery, pageIndex, pageSize);
-      if (records == null) {
-        stillFailed.add(pageIndex);
-      } else {
-        loaded[pageIndex] = records;
+    if (!aborted && !_dumpCancelled) {
+      for (final pageIndex in failed) {
+        if (_dumpCancelled) break;
+        // По одной и с паузой: в общей пачке эти страницы падали именно из-за
+        // одновременности.
+        await Future<void>.delayed(const Duration(milliseconds: 800));
+        final records = await _fetchPageSplitting(
+          baseQuery,
+          pageIndex,
+          pageSize,
+        );
+        if (records == null) {
+          stillFailed.add(pageIndex);
+        } else {
+          loaded[pageIndex] = records;
+        }
+        publish();
       }
-      publish();
     }
 
+    final records = flatten();
     if (stillFailed.isNotEmpty) {
       // ignore: avoid_print
       print(
         '[analytics] не догрузились страницы $stillFailed — отчёты строятся '
-        'по ${flatten().length} записям из $expected',
+        'по ${records.length} записям из $expected',
       );
     }
 
     publish(force: true);
-    return (records: flatten(), complete: stillFailed.isEmpty);
+    return (
+      records: records,
+      complete:
+          stillFailed.isEmpty && !aborted && !_dumpCancelled && failed.isEmpty,
+    );
   }
 
   static String _formatSpaceDateTime(DateTime value) {

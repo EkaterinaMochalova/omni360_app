@@ -117,26 +117,50 @@ class _CampaignDetailScreenState extends ConsumerState<CampaignDetailScreen> {
     return (from, to);
   }
 
-  /// Предупреждение перед выгрузкой всего периода.
-  Future<bool> _confirmFullPeriod(BuildContext context) async {
+  /// Предупреждение перед выгрузкой всего периода — с настоящим объёмом.
+  ///
+  /// Сначала спрашиваем у бэкенда, сколько в периоде показов (один лёгкий
+  /// запрос), и только потом предлагаем решение. Абстрактное «может занять
+  /// несколько минут» ничего не говорит: на 20 тысячах это полминуты, а на 300
+  /// тысячах — часы, и узнавать это через час ожидания неправильно.
+  Future<bool> _confirmFullPeriod(
+    BuildContext context,
+    CampaignAnalyticsController controller,
+    (DateTime, DateTime) range,
+  ) async {
+    final count = await controller.countImpressions(range.$1, range.$2);
+    if (!context.mounted) return false;
+
+    // Оценка снизу: запросы идут пачками по 6, каждый в среднем 1,5–5 секунд.
+    final pages = count == null ? 0 : (count / 500).ceil();
+    final minMinutes = (pages / 6 * 1.5 / 60).ceil();
+    final maxMinutes = (pages / 6 * 5 / 60).ceil();
+    final heavy = count != null && count > 100000;
+
     final go = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         backgroundColor: Colors.white,
-        title: const Text(
-          'Загрузить весь период?',
-          style: TextStyle(
+        title: Text(
+          heavy ? 'Период очень большой' : 'Загрузить весь период?',
+          style: const TextStyle(
             color: kTextPrimary,
             fontSize: 16,
             fontWeight: FontWeight.bold,
           ),
         ),
-        content: const Text(
-          'Отчёты считаются по всем показам за весь срок кампании — это '
-          'десятки тысяч записей и несколько минут на крупных кампаниях. '
-          'Блоки наполняются по ходу загрузки, а не в самом конце: цифры будут '
-          'расти на глазах.',
-          style: TextStyle(color: kTextSecondary, fontSize: 13),
+        content: Text(
+          count == null
+              ? 'Отчёты считаются по всем показам за период. Объём заранее '
+                    'узнать не удалось — на крупных кампаниях это минуты. Блоки '
+                    'наполняются по ходу загрузки.'
+              : 'За период ${_fmtCount.format(count)} показов — это около '
+                    '${_fmtCount.format(pages)} запросов к бэкенду и примерно '
+                    '$minMinutes–$maxMinutes мин.\n\n'
+                    '${heavy ? 'На таком объёме бэкенд начинает отдавать ошибки, и часть страниц может не дойти. Надёжнее выбрать период календарём — например, по неделям.\n\n' : ''}'
+                    'Блоки наполняются по ходу, загрузку можно остановить в '
+                    'любой момент — посчитается по тому, что успело прийти.',
+          style: const TextStyle(color: kTextSecondary, fontSize: 13),
         ),
         actions: [
           TextButton(
@@ -145,8 +169,10 @@ class _CampaignDetailScreenState extends ConsumerState<CampaignDetailScreen> {
           ),
           FilledButton(
             onPressed: () => Navigator.pop(dialogContext, true),
-            style: FilledButton.styleFrom(backgroundColor: kAccent),
-            child: const Text('Загрузить'),
+            style: FilledButton.styleFrom(
+              backgroundColor: heavy ? const Color(0xFFE65100) : kAccent,
+            ),
+            child: Text(heavy ? 'Всё равно грузить' : 'Загрузить'),
           ),
         ],
       ),
@@ -356,9 +382,13 @@ class _CampaignDetailScreenState extends ConsumerState<CampaignDetailScreen> {
                     : () async {
                         final range = _fullPeriodOf(campaign)!;
                         // Весь период выгружается целиком, без предела по
-                        // страницам, — на крупных кампаниях это минуты.
-                        // Спрашиваем заранее, чтобы это не было сюрпризом.
-                        final go = await _confirmFullPeriod(context);
+                        // страницам. Спрашиваем заранее и с реальным объёмом,
+                        // чтобы это не было сюрпризом на час.
+                        final go = await _confirmFullPeriod(
+                          context,
+                          analyticsController,
+                          range,
+                        );
                         if (!go) return;
                         analyticsController.setRange(range.$1, range.$2);
                       },
@@ -389,7 +419,6 @@ class _CampaignDetailScreenState extends ConsumerState<CampaignDetailScreen> {
                       border: Border.all(color: kAccent.withValues(alpha: 0.3)),
                     ),
                     child: Row(
-                      mainAxisSize: MainAxisSize.min,
                       children: [
                         const SizedBox(
                           width: 14,
@@ -421,6 +450,24 @@ class _CampaignDetailScreenState extends ConsumerState<CampaignDetailScreen> {
                             ),
                           ),
                         ),
+                        // Остановить можно в любой момент: отчёты посчитаются
+                        // по тому, что успело прийти. Раньше выгрузку нечем
+                        // было прервать — только перезагрузкой страницы.
+                        if (analytics.dumpInProgress)
+                          TextButton(
+                            onPressed: analyticsController.cancelDump,
+                            style: TextButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                              ),
+                              minimumSize: const Size(0, 28),
+                              foregroundColor: kAccent,
+                            ),
+                            child: const Text(
+                              'Остановить',
+                              style: TextStyle(fontSize: 12),
+                            ),
+                          ),
                       ],
                     ),
                   ),
