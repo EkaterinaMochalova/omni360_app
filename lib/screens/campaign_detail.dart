@@ -18,6 +18,10 @@ import '../utils/pace_colors.dart';
 import '../utils/broadcast_schedule.dart';
 import '../widgets/loading_placeholders.dart';
 
+/// Счётчик показов в шапке — с разделителями разрядов: «123 500» читается, а
+/// «123500» на ходу нет.
+final _fmtCount = NumberFormat.decimalPattern('ru_RU');
+
 const _kDetailBlockIds = [
   'overview',
   'recommendations',
@@ -128,9 +132,10 @@ class _CampaignDetailScreenState extends ConsumerState<CampaignDetailScreen> {
           ),
         ),
         content: const Text(
-          'Отчёты считаются по всем показам за весь срок кампании — '
-          'это десятки тысяч записей и несколько минут ожидания на крупных '
-          'кампаниях. Дашборд можно листать, пока идёт загрузка.',
+          'Отчёты считаются по всем показам за весь срок кампании — это '
+          'десятки тысяч записей и несколько минут на крупных кампаниях. '
+          'Блоки наполняются по ходу загрузки, а не в самом конце: цифры будут '
+          'расти на глазах.',
           style: TextStyle(color: kTextSecondary, fontSize: 13),
         ),
         actions: [
@@ -250,7 +255,7 @@ class _CampaignDetailScreenState extends ConsumerState<CampaignDetailScreen> {
             // Пока считается выгрузка показов (на «всём периоде» это минуты),
             // верхнюю плитку занимает мини-игра. Блок существует только во
             // время загрузки и в сохранённый порядок не попадает.
-            if (analytics.allRecords.isLoading)
+            if (analytics.dumpInProgress)
               kLoadingGameBlockId: (
                 id: kLoadingGameBlockId,
                 isWide: false,
@@ -293,7 +298,7 @@ class _CampaignDetailScreenState extends ConsumerState<CampaignDetailScreen> {
                       records.length,
                   periodStart: analytics.query.start,
                   periodEnd: analytics.query.end,
-                  recordsLoading: analytics.allRecords.isLoading,
+                  recordsLoading: analytics.dumpInProgress,
                 ),
               ),
             'planFact': (
@@ -368,8 +373,7 @@ class _CampaignDetailScreenState extends ConsumerState<CampaignDetailScreen> {
               // Тонкая полоска в 2 пикселя терялась, и смена периода выглядела
               // так, будто ничего не происходит. Теперь это заметная плашка
               // с крутилкой сразу под выбором периода.
-              if (analytics.impressions.isLoading ||
-                  analytics.allRecords.isLoading)
+              if (analytics.impressions.isLoading || analytics.dumpInProgress)
                 Container(
                   width: double.infinity,
                   color: Colors.white,
@@ -398,8 +402,16 @@ class _CampaignDetailScreenState extends ConsumerState<CampaignDetailScreen> {
                         const SizedBox(width: 10),
                         Flexible(
                           child: Text(
+                            // Счётчик вместо «идёт загрузка»: на большом
+                            // периоде без него непонятно, движется ли дело.
                             analytics.impressions.isLoading
                                 ? 'Загружаем данные за выбранный период…'
+                                : analytics.dumpTotal > 0
+                                ? 'Догружаем показы для отчётов: '
+                                      '${_fmtCount.format(analytics.dumpLoaded)}'
+                                      ' из '
+                                      '${_fmtCount.format(analytics.dumpTotal)}'
+                                      ' — отчёты пополняются по ходу'
                                 : 'Дашборд готов, догружаем полную выгрузку '
                                       'показов для отчётов…',
                             style: const TextStyle(

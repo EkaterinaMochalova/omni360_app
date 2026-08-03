@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -88,6 +89,15 @@ class CampaignAnalyticsState {
   /// момент они посчитаны — иначе кеш выглядит как свежая загрузка.
   final DateTime? loadedAt;
 
+  /// Выгрузка ещё идёт, но часть данных уже пришла: [allRecords] заполнен
+  /// промежуточным срезом. Отдельный признак нужен потому, что `isLoading` у
+  /// [allRecords] снимается с первым же срезом.
+  final bool dumpInProgress;
+
+  /// Сколько показов уже загружено и сколько всего ожидается.
+  final int dumpLoaded;
+  final int dumpTotal;
+
   const CampaignAnalyticsState({
     required this.impressions,
     required this.aggregate,
@@ -97,6 +107,9 @@ class CampaignAnalyticsState {
     required this.allRecords,
     this.allRecordsComplete = true,
     this.loadedAt,
+    this.dumpInProgress = false,
+    this.dumpLoaded = 0,
+    this.dumpTotal = 0,
   });
 
   factory CampaignAnalyticsState.initial() => CampaignAnalyticsState(
@@ -117,6 +130,9 @@ class CampaignAnalyticsState {
     AsyncValue<List<CampaignImpressionRecord>>? allRecords,
     bool? allRecordsComplete,
     DateTime? loadedAt,
+    bool? dumpInProgress,
+    int? dumpLoaded,
+    int? dumpTotal,
   }) {
     return CampaignAnalyticsState(
       impressions: impressions ?? this.impressions,
@@ -127,6 +143,9 @@ class CampaignAnalyticsState {
       allRecords: allRecords ?? this.allRecords,
       allRecordsComplete: allRecordsComplete ?? this.allRecordsComplete,
       loadedAt: loadedAt ?? this.loadedAt,
+      dumpInProgress: dumpInProgress ?? this.dumpInProgress,
+      dumpLoaded: dumpLoaded ?? this.dumpLoaded,
+      dumpTotal: dumpTotal ?? this.dumpTotal,
     );
   }
 }
@@ -143,6 +162,10 @@ class CampaignAnalyticsController
 
   final String campaignId;
   final Omni360Client _client;
+
+  /// Номер текущей выгрузки. Смена периода наращивает его, и промежуточные
+  /// срезы прошлой выгрузки перестают попадать в состояние.
+  int _dumpGeneration = 0;
 
   final FlutterSecureStorage _storage = const FlutterSecureStorage();
 
@@ -184,11 +207,15 @@ class CampaignAnalyticsController
   }
 
   Future<void> fetchImpressions() async {
+    _dumpGeneration++;
     state = state.copyWith(
       impressions: const AsyncValue.loading(),
       aggregate: const AsyncValue.loading(),
       allRecords: const AsyncValue.loading(),
       allRecordsComplete: true,
+      dumpInProgress: true,
+      dumpLoaded: 0,
+      dumpTotal: 0,
     );
 
     // Первая страница и полная выгрузка всех записей — независимые запросы, и
@@ -224,25 +251,53 @@ class CampaignAnalyticsController
   }
 
   Future<void> _loadAggregateAndRecords(CampaignAnalyticsQuery query) async {
+    final generation = _dumpGeneration;
     try {
-      final result = await _fetchAggregateWithRecords(query);
+      final result = await _fetchAllRecords(
+        query,
+        onProgress: (records, total) {
+          // Смена периода отменяет старую выгрузку: её промежуточные срезы не
+          // должны затирать данные нового запроса.
+          if (generation != _dumpGeneration) return;
+          state = state.copyWith(
+            aggregate: AsyncValue.data(
+              CampaignAnalyticsAggregate.fromRecords(records),
+            ),
+            allRecords: AsyncValue.data(records),
+            allRecordsComplete: false,
+            dumpInProgress: true,
+            dumpLoaded: records.length,
+            dumpTotal: total,
+            loadedAt: DateTime.now(),
+          );
+        },
+      );
+      if (generation != _dumpGeneration) return;
       state = state.copyWith(
-        aggregate: AsyncValue.data(result.aggregate),
+        aggregate: AsyncValue.data(
+          CampaignAnalyticsAggregate.fromRecords(result.records),
+        ),
         allRecords: AsyncValue.data(result.records),
         allRecordsComplete: result.complete,
+        dumpInProgress: false,
+        dumpLoaded: result.records.length,
         loadedAt: DateTime.now(),
       );
     } on DioException catch (e, st) {
+      if (generation != _dumpGeneration) return;
       final serverDetails = _extractServerDetails(e);
       final error = serverDetails == null ? e : Exception(serverDetails);
       state = state.copyWith(
         aggregate: AsyncValue.error(error, st),
         allRecords: AsyncValue.error(error, st),
+        dumpInProgress: false,
       );
     } catch (e, st) {
+      if (generation != _dumpGeneration) return;
       state = state.copyWith(
         aggregate: AsyncValue.error(e, st),
         allRecords: AsyncValue.error(e, st),
+        dumpInProgress: false,
       );
     }
   }
@@ -256,10 +311,14 @@ class CampaignAnalyticsController
 
   /// Повторить выгрузку показов — когда часть страниц не дошла.
   Future<void> loadAllRecords() async {
+    _dumpGeneration++;
     state = state.copyWith(
       aggregate: const AsyncValue.loading(),
       allRecords: const AsyncValue.loading(),
       allRecordsComplete: true,
+      dumpInProgress: true,
+      dumpLoaded: 0,
+      dumpTotal: 0,
     );
     await _loadAggregateAndRecords(state.query);
   }
@@ -376,11 +435,17 @@ class CampaignAnalyticsController
     DioException? lastError;
 
     for (final params in attempts) {
-      // Три попытки на 502/503/504 с растущей паузой: прокси отдаёт 502, когда
-      // бэкенд обрывает соединение, и одного повтора не хватало. Это не тот
-      // случай, что с таймаутами: 502 — уже завершённый ответ, так что
-      // висящих запросов повтор не добавляет.
-      const maxAttempts = 3;
+      // Повторы на 502/503/504 с растущей паузой: прокси отдаёт 502, когда
+      // бэкенд обрывает соединение или не успевает ответить. Это не тот случай,
+      // что с таймаутами: 502 — уже завершённый ответ, так что висящих запросов
+      // повтор не добавляет. Паузы длиннее прежних 300/600 мс: под нагрузкой
+      // бэкенду нужны секунды, а не доли секунды, чтобы разгрузиться.
+      const backoff = [
+        Duration(milliseconds: 500),
+        Duration(milliseconds: 1500),
+        Duration(seconds: 4),
+      ];
+      final maxAttempts = backoff.length + 1;
       for (var attempt = 0; attempt < maxAttempts; attempt++) {
         try {
           return await _client.dio.get(
@@ -398,9 +463,7 @@ class CampaignAnalyticsController
             // повтор на каждый подвисший запрос удваивает нагрузку (а
             // _fetchAllRecords и так шлёт страницы пачками по 6 параллельно),
             // что превращает редкие подвисания в стабильный затык.
-            await Future<void>.delayed(
-              Duration(milliseconds: 300 * (attempt + 1)),
-            );
+            await Future<void>.delayed(backoff[attempt]);
             continue;
           }
           if (status == 400) {
@@ -419,77 +482,181 @@ class CampaignAnalyticsController
     return _fetchImpressionsWithFallback(query);
   }
 
-  Future<
-    ({
-      CampaignAnalyticsAggregate aggregate,
-      List<CampaignImpressionRecord> records,
-      bool complete,
-    })
-  >
-  _fetchAggregateWithRecords(CampaignAnalyticsQuery query) async {
-    final result = await _fetchAllRecords(query);
-    return (
-      aggregate: CampaignAnalyticsAggregate.fromRecords(result.records),
-      records: result.records,
-      complete: result.complete,
-    );
+  /// Одна страница выгрузки. null — не удалось даже после дробления.
+  ///
+  /// 502 от прокси на тяжёлой странице означает не «сервер сломался», а «ответ
+  /// не успел прийти за отведённое функции время». Повторять такой запрос в том
+  /// же виде смысла мало — он снова не успеет. Поэтому упавшую страницу дробим
+  /// пополам: страница P размера S — это ровно страницы 2P и 2P+1 размера S/2,
+  /// то же множество записей, но каждый запрос вдвое легче.
+  Future<List<CampaignImpressionRecord>?> _fetchPageSplitting(
+    CampaignAnalyticsQuery baseQuery,
+    int pageIndex,
+    int size, {
+    int depth = 0,
+  }) async {
+    try {
+      final response = await _fetchImpressionsWithFallback(
+        baseQuery.copyWith(page: pageIndex, size: size),
+      );
+      return CampaignImpressionsPage.fromJson(
+        response.data as Map<String, dynamic>,
+      ).content;
+    } catch (e) {
+      if (depth >= 2) {
+        // ignore: avoid_print
+        print('[analytics] страница $pageIndex (по $size) не загрузилась: $e');
+        return null;
+      }
+      final half = size ~/ 2;
+      final first = await _fetchPageSplitting(
+        baseQuery,
+        pageIndex * 2,
+        half,
+        depth: depth + 1,
+      );
+      final second = await _fetchPageSplitting(
+        baseQuery,
+        pageIndex * 2 + 1,
+        half,
+        depth: depth + 1,
+      );
+      if (first == null || second == null) return null;
+      return [...first, ...second];
+    }
   }
 
   /// Полная выгрузка показов за период.
   ///
-  /// Возвращает и признак полноты: раньше выгрузка либо доходила до конца, либо
-  /// падала целиком, и отчёты молча строились по неполному набору или пропадали
-  /// совсем. Теперь при сбое пачки останавливаемся и честно отдаём то, что
-  /// успели, помечая результат неполным.
+  /// [onProgress] получает промежуточные срезы: отчёты наполняются по ходу, а не
+  /// после всей выгрузки — на 120 тысячах показов это минуты ожидания пустых
+  /// блоков. Вызывается не чаще раза в несколько секунд: пересборка отчётов на
+  /// таком объёме сама по себе не бесплатная.
+  ///
+  /// Возвращает признак полноты. Раньше первая же упавшая пачка обрывала
+  /// выгрузку целиком, и весь хвост периода терялся; теперь упавшие страницы
+  /// досылаются по одной в конце, и неполным результат считается только если и
+  /// это не помогло.
   Future<({List<CampaignImpressionRecord> records, bool complete})>
-  _fetchAllRecords(CampaignAnalyticsQuery query) async {
-    final aggregateQuery = query.copyWith(page: 0, size: 500);
-    final firstResponse = await _fetchImpressionsWithFallback(aggregateQuery);
-    final firstPage = CampaignImpressionsPage.fromJson(
-      firstResponse.data as Map<String, dynamic>,
-    );
-    final allRecords = <CampaignImpressionRecord>[...firstPage.content];
-
-    // Границы по числу страниц здесь больше нет: выбрал период — значит хочет
-    // видеть его целиком, а не сначала ждать 20 тысяч показов, потом ещё раз
-    // столько же по кнопке. Про длительность предупреждаем при выборе периода.
-    final pagesToLoad = firstPage.totalPages;
-    var complete = true;
-
-    // Страницы тянем ограниченными пачками, а не все разом: прокси/бэкенд и
-    // так периодически отдаёт 502 под нагрузкой (см. isRetryableStatus в
-    // _fetchImpressionsWithFallback), не стоит усугублять это залпом из
-    // десятков параллельных запросов при большом объёме показов.
-    const chunkSize = 6;
-    for (var start = 1; start < pagesToLoad; start += chunkSize) {
-      final end = (start + chunkSize).clamp(0, pagesToLoad);
+  _fetchAllRecords(
+    CampaignAnalyticsQuery query, {
+    void Function(List<CampaignImpressionRecord> records, int total)? onProgress,
+  }) async {
+    // Первая страница задаёт размер для всей выгрузки. Если на 500 записях она
+    // не приходит (именно на ней и валилась вся аналитика с 502), берём мельче:
+    // страниц будет больше, зато каждая успевает ответить. Дробить её так же,
+    // как остальные, нельзя — из неё же берутся число страниц и общий итог.
+    const sizeLadder = [500, 250, 125];
+    CampaignImpressionsPage? firstPage;
+    var pageSize = sizeLadder.first;
+    Object? firstError;
+    for (final size in sizeLadder) {
       try {
-        final chunkResponses = await Future.wait([
-          for (var pageIndex = start; pageIndex < end; pageIndex++)
-            _fetchImpressionsWithFallback(
-              aggregateQuery.copyWith(page: pageIndex),
-            ),
-        ]);
-        for (final response in chunkResponses) {
-          final page = CampaignImpressionsPage.fromJson(
-            response.data as Map<String, dynamic>,
-          );
-          allRecords.addAll(page.content);
-        }
-      } catch (e) {
-        // Одна упавшая пачка не должна обнулять уже собранное: отдаём частичный
-        // результат, а интерфейс скажет, что данные неполные.
-        // ignore: avoid_print
-        print(
-          '[analytics] страницы $start–$end не загрузились, '
-          'отчёты строятся по ${allRecords.length} записям: $e',
+        final response = await _fetchImpressionsWithFallback(
+          query.copyWith(page: 0, size: size),
         );
-        complete = false;
+        firstPage = CampaignImpressionsPage.fromJson(
+          response.data as Map<String, dynamic>,
+        );
+        pageSize = size;
         break;
+      } catch (e) {
+        firstError = e;
+        // ignore: avoid_print
+        print('[analytics] первая страница по $size не пришла: $e');
       }
     }
+    if (firstPage == null) throw firstError!;
 
-    return (records: allRecords, complete: complete);
+    final baseQuery = query.copyWith(page: 0, size: pageSize);
+
+    // Держим страницы по номерам, а не одним списком: досланная позже страница
+    // встаёт на своё место, и порядок записей не зависит от порядка ответов.
+    final loaded = <int, List<CampaignImpressionRecord>>{0: firstPage.content};
+    final pagesToLoad = firstPage.totalPages;
+    final expected = firstPage.totalElements > 0
+        ? firstPage.totalElements
+        : pagesToLoad * pageSize;
+
+    List<CampaignImpressionRecord> flatten() {
+      final keys = loaded.keys.toList()..sort();
+      return [for (final key in keys) ...loaded[key]!];
+    }
+
+    var lastPublish = DateTime.now();
+    void publish({bool force = false}) {
+      if (onProgress == null) return;
+      final now = DateTime.now();
+      if (!force && now.difference(lastPublish) < const Duration(seconds: 4)) {
+        return;
+      }
+      lastPublish = now;
+      onProgress(flatten(), expected);
+    }
+
+    final failed = <int>[];
+    // Пачки параллельных запросов, но с оглядкой: 502 под нагрузкой лечится не
+    // повтором, а снижением давления, поэтому после сбоя пачка сужается и
+    // расширяется обратно, только если пошло гладко.
+    const maxChunk = 6;
+    var chunkSize = maxChunk;
+    var next = 1;
+
+    while (next < pagesToLoad) {
+      final end = min(next + chunkSize, pagesToLoad);
+      final results = await Future.wait([
+        for (var pageIndex = next; pageIndex < end; pageIndex++)
+          _fetchPageSplitting(baseQuery, pageIndex, pageSize),
+      ]);
+
+      var failures = 0;
+      for (var i = 0; i < results.length; i++) {
+        final pageIndex = next + i;
+        final records = results[i];
+        if (records == null) {
+          failed.add(pageIndex);
+          failures++;
+        } else {
+          loaded[pageIndex] = records;
+        }
+      }
+      next = end;
+
+      if (failures > 0) {
+        chunkSize = max(2, chunkSize - 2);
+        await Future<void>.delayed(const Duration(seconds: 2));
+      } else if (chunkSize < maxChunk) {
+        chunkSize += 1;
+      }
+
+      // Первую пачку отдаём сразу: пусть блоки наполнятся, не дожидаясь конца.
+      publish(force: next <= 1 + maxChunk);
+    }
+
+    final stillFailed = <int>[];
+    for (final pageIndex in failed) {
+      // По одной и с паузой: в общей пачке эти страницы падали именно из-за
+      // одновременности.
+      await Future<void>.delayed(const Duration(milliseconds: 800));
+      final records = await _fetchPageSplitting(baseQuery, pageIndex, pageSize);
+      if (records == null) {
+        stillFailed.add(pageIndex);
+      } else {
+        loaded[pageIndex] = records;
+      }
+      publish();
+    }
+
+    if (stillFailed.isNotEmpty) {
+      // ignore: avoid_print
+      print(
+        '[analytics] не догрузились страницы $stillFailed — отчёты строятся '
+        'по ${flatten().length} записям из $expected',
+      );
+    }
+
+    publish(force: true);
+    return (records: flatten(), complete: stillFailed.isEmpty);
   }
 
   static String _formatSpaceDateTime(DateTime value) {

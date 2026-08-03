@@ -40,24 +40,32 @@ exports.handler = async (event) => {
 
     // Бэкенд иногда обрывает соединение на одном запросе из пачки, и тогда
     // fetch падает ещё до ответа — клиент видел 502 «fetch failed». Повторяем
-    // только безопасные для повтора запросы (GET/HEAD) и только при сетевом
-    // сбое: ответ с кодом ошибки отдаём как есть, его повторит клиент.
+    // только безопасные для повтора запросы (GET/HEAD).
+    //
+    // Повторяем и ответы 502/503/504 от самого бэкенда: раньше они уходили
+    // клиенту как есть, и повтор шёл вторым кругом через CDN — то есть на
+    // каждую попытку тратился лишний путь туда-обратно. Здесь мы уже рядом с
+    // бэкендом, так что повтор дешевле и быстрее.
     const isRetryable = ['GET', 'HEAD'].includes(event.httpMethod);
-    const attempts = isRetryable ? 3 : 1;
+    const backoffMs = isRetryable ? [400, 1200, 2500] : [];
 
     let response;
     let lastError;
-    for (let attempt = 0; attempt < attempts; attempt++) {
+    for (let attempt = 0; attempt <= backoffMs.length; attempt++) {
       try {
         response = await fetch(url, {method: event.httpMethod, headers, body});
         lastError = undefined;
-        break;
+        const upstreamGlitch = [502, 503, 504].includes(response.status);
+        if (!upstreamGlitch || attempt === backoffMs.length) {
+          break;
+        }
       } catch (error) {
         lastError = error;
-        if (attempt < attempts - 1) {
-          await new Promise((resolve) => setTimeout(resolve, 300 * (attempt + 1)));
+        if (attempt === backoffMs.length) {
+          break;
         }
       }
+      await new Promise((resolve) => setTimeout(resolve, backoffMs[attempt]));
     }
     if (lastError !== undefined) {
       throw lastError;

@@ -502,15 +502,23 @@ Widget _requestsSummary(CampaignAnalyticsAggregate aggregate) {
 /// карточки. Раньше плашка была отдельным соседом сверху: она выпадала из
 /// рамки блока, добавляла ему высоту и ломала заданный пользователем размер.
 Widget _fromAllRecords(
-  AsyncValue<List<CampaignImpressionRecord>> records,
+  CampaignAnalyticsState state,
   String title,
   Widget Function(Widget? notice) build, {
-  bool complete = true,
   VoidCallback? onLoadAll,
 }) {
+  final records = state.allRecords;
   return records.when(
-    data: (loaded) =>
-        build(complete ? null : _partialNotice(loaded.length, onLoadAll)),
+    data: (loaded) {
+      // Выгрузка идёт — блок уже показывает данные по тому, что успело прийти:
+      // ждать все 120 тысяч показов, глядя на скелет, незачем.
+      if (state.dumpInProgress) {
+        return build(_progressNotice(loaded.length, state.dumpTotal));
+      }
+      return state.allRecordsComplete
+          ? build(null)
+          : build(_partialNotice(loaded.length, onLoadAll));
+    },
     // Скелет и ошибка — той же формы, что у остальных блоков.
     loading: () => CardSectionState(
       title: title,
@@ -526,8 +534,44 @@ Widget _fromAllRecords(
   );
 }
 
+/// Плашка «данные ещё пополняются» с прогрессом.
+Widget _progressNotice(int loadedCount, int total) {
+  final fmt = NumberFormat.decimalPattern('ru_RU');
+  final progress = total > 0 ? (loadedCount / total).clamp(0.0, 1.0) : null;
+  return Container(
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+    decoration: BoxDecoration(
+      color: kAccentLight,
+      borderRadius: BorderRadius.circular(8),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          total > 0
+              ? 'Пополняется: ${fmt.format(loadedCount)} из '
+                    '${fmt.format(total)} показов'
+              : 'Пополняется: ${fmt.format(loadedCount)} показов',
+          style: const TextStyle(color: kAccent, fontSize: 11),
+        ),
+        const SizedBox(height: 4),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(3),
+          child: LinearProgressIndicator(
+            value: progress,
+            minHeight: 3,
+            backgroundColor: Colors.white,
+            valueColor: const AlwaysStoppedAnimation(kAccent),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
 /// Плашка о том, что отчёт посчитан по неполной выгрузке.
 Widget _partialNotice(int loadedCount, VoidCallback? onLoadAll) {
+  final fmt = NumberFormat.decimalPattern('ru_RU');
   return Container(
     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
     decoration: BoxDecoration(
@@ -540,7 +584,8 @@ Widget _partialNotice(int loadedCount, VoidCallback? onLoadAll) {
           child: Text(
             // Предела по страницам больше нет, так что неполная выгрузка теперь
             // означает только одно: часть страниц не дошла с бэкенда.
-            'Часть страниц не загрузилась: посчитано по $loadedCount показам.',
+            'Часть страниц не загрузилась: посчитано по '
+            '${fmt.format(loadedCount)} показам.',
             style: const TextStyle(color: Color(0xFFE65100), fontSize: 11),
           ),
         ),
@@ -792,13 +837,12 @@ class _CampaignDashboardBodyState extends State<CampaignDashboardBody> {
           id: 'daily',
           isWide: true,
           child: _fromAllRecords(
-            state.allRecords,
+            state,
             'Сводная по дням',
             (notice) => DailyBreakdownSection(
               rows: lossReport.dailyBreakdown,
               notice: notice,
             ),
-            complete: state.allRecordsComplete,
             onLoadAll: widget.onLoadAllRecords,
           ),
         ),
@@ -807,13 +851,12 @@ class _CampaignDashboardBodyState extends State<CampaignDashboardBody> {
           id: 'bidReport',
           isWide: true,
           child: _fromAllRecords(
-            state.allRecords,
+            state,
             'Поднять ставки',
             (notice) => BidRaiseReportSection(
               rows: lossReport.bidRaiseRows,
               notice: notice,
             ),
-            complete: state.allRecordsComplete,
             onLoadAll: widget.onLoadAllRecords,
           ),
         ),
@@ -822,13 +865,12 @@ class _CampaignDashboardBodyState extends State<CampaignDashboardBody> {
           id: 'operatorReport',
           isWide: true,
           child: _fromAllRecords(
-            state.allRecords,
+            state,
             'К оператору',
             (notice) => OperatorIssueReportSection(
               groups: lossReport.operatorIssueGroups,
               notice: notice,
             ),
-            complete: state.allRecordsComplete,
             onLoadAll: widget.onLoadAllRecords,
           ),
         ),
