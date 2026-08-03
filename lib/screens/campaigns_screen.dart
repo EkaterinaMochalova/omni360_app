@@ -647,8 +647,43 @@ class _CampaignsScreenState extends ConsumerState<CampaignsScreen> {
         ),
         data: (all) {
           final list = _apply(all);
+          // Неполный список выглядит точно как полный, и «нет кампаний» тогда
+          // означает совсем не то, что кажется. Говорим об этом прямо.
+          final incomplete = ref.read(campaignsProvider.notifier).incomplete;
           return Column(
             children: [
+              if (incomplete)
+                Container(
+                  width: double.infinity,
+                  color: const Color(0xFFFFF3E0),
+                  padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
+                  child: Row(
+                    children: [
+                      const Expanded(
+                        child: Text(
+                          'Бэкенд отдал список не полностью — часть кампаний '
+                          'может отсутствовать.',
+                          style: TextStyle(
+                            color: Color(0xFFE65100),
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: () =>
+                            ref.read(campaignsProvider.notifier).fetch(),
+                        style: TextButton.styleFrom(
+                          foregroundColor: const Color(0xFFE65100),
+                          minimumSize: const Size(0, 30),
+                        ),
+                        child: const Text(
+                          'Повторить',
+                          style: TextStyle(fontSize: 12),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               // Stats bar
               _StatsBar(all: all, filtered: list, sort: _sort),
               // Grid

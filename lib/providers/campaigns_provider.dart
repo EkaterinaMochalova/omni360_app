@@ -11,6 +11,12 @@ import '../utils/broadcast_schedule.dart';
 class CampaignsNotifier extends StateNotifier<AsyncValue<List<Campaign>>> {
   final _client = Omni360Client();
 
+  /// Последняя загрузка прошла не полностью: часть страниц не пришла.
+  ///
+  /// Без этого признака короткий список выглядел как полный, и «нет активных
+  /// кампаний» было не отличить от «страница с ними не загрузилась».
+  bool incomplete = false;
+
   CampaignsNotifier() : super(const AsyncValue.loading()) {
     fetch();
   }
@@ -80,6 +86,7 @@ class CampaignsNotifier extends StateNotifier<AsyncValue<List<Campaign>>> {
       var pageSize = _pageSizeLadder.first;
       var page = 0;
       var totalPages = 1;
+      var complete = true;
 
       do {
         Response? response;
@@ -102,8 +109,9 @@ class CampaignsNotifier extends StateNotifier<AsyncValue<List<Campaign>>> {
           // ignore: avoid_print
           print(
             '[campaigns] список неполный: страница $page не пришла, '
-            'показываем ${campaigns.length} кампаний',
+            'собрано ${campaigns.length} кампаний',
           );
+          complete = false;
           break;
         }
 
@@ -135,6 +143,29 @@ class CampaignsNotifier extends StateNotifier<AsyncValue<List<Campaign>>> {
         page++;
       } while (page < totalPages && page < _maxPages);
 
+      // Диагностика: по ней сразу видно, все ли кампании пришли и какие у них
+      // статусы — «нет активных» бывает и настоящим ответом бэкенда.
+      final byStatus = <String, int>{};
+      for (final campaign in campaigns) {
+        byStatus[campaign.displayStatus] =
+            (byStatus[campaign.displayStatus] ?? 0) + 1;
+      }
+      // ignore: avoid_print
+      print(
+        '[campaigns] загружено ${campaigns.length} '
+        '(страниц $page из $totalPages по $pageSize, '
+        'полностью: $complete) — $byStatus',
+      );
+
+      // Неполный список не должен подменять уже показанный полный: иначе
+      // кампания, чья страница не пришла, просто исчезает с экрана.
+      if (!complete && previous != null && previous.length > campaigns.length) {
+        incomplete = true;
+        state = AsyncValue.data(previous);
+        return previous;
+      }
+
+      incomplete = !complete;
       state = AsyncValue.data(campaigns);
       return campaigns;
     } catch (e, st) {
