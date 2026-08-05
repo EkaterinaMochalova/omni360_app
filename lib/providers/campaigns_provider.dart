@@ -159,18 +159,25 @@ class CampaignsNotifier extends StateNotifier<AsyncValue<List<Campaign>>> {
   /// Возвращает null, если страница так и не пришла: список из-за одной
   /// страницы целиком терять незачем. Ошибки доступа (401/403) прокидываем —
   /// это не временный сбой, и молчать о нём нельзя.
+  /// [retries] — сколько раз повторять. Меньше трёх нужно там, где важнее
+  /// быстро понять «не выйдет», чем добиться ответа: перебор размеров страницы
+  /// и подбор имени параметра поиска. Прокси внутри себя тоже повторяет, так
+  /// что каждая наша попытка — это до четырёх обращений к бэкенду, и полный
+  /// перебор на лежащем бэкенде занимал минуты.
   Future<Response?> _fetchCampaignsPage(
     int page,
     int size, {
     Map<String, dynamic>? extra,
+    int retries = 3,
   }) async {
     const backoff = [
       Duration(milliseconds: 500),
       Duration(milliseconds: 1500),
       Duration(seconds: 4),
     ];
+    final maxAttempt = retries < backoff.length ? retries : backoff.length;
 
-    for (var attempt = 0; attempt <= backoff.length; attempt++) {
+    for (var attempt = 0; attempt <= maxAttempt; attempt++) {
       try {
         return await _client.dio.get(
           '/api/v1.0/clients/campaigns',
@@ -188,7 +195,7 @@ class CampaignsNotifier extends StateNotifier<AsyncValue<List<Campaign>>> {
             e.type == DioExceptionType.receiveTimeout;
         if (!temporary) rethrow;
 
-        if (attempt == backoff.length) {
+        if (attempt == maxAttempt) {
           // ignore: avoid_print
           print(
             '[campaigns] страница $page (по $size) не пришла: '
@@ -422,7 +429,17 @@ class CampaignsNotifier extends StateNotifier<AsyncValue<List<Campaign>>> {
     String query,
   ) async {
     try {
-      final response = await _fetchCampaignsPage(0, 50, extra: {param: query});
+      // retries: 1 — это подбор имени параметра вслепую, пяти таких попыток
+      // подряд, и на нестабильном бэкенде полный набор повторов (до 4с
+      // бэкоффа на каждой) означал до получаса лишней нагрузки на тот же
+      // эндпоинт, который и так еле отвечает. Лучше быстро сказать «не
+      // получилось» и не топить бэкенд ещё сильнее.
+      final response = await _fetchCampaignsPage(
+        0,
+        50,
+        extra: {param: query},
+        retries: 1,
+      );
       if (response == null) return (items: null, ignored: false);
 
       final parsed = _parsePage(response.data);
@@ -436,7 +453,12 @@ class CampaignsNotifier extends StateNotifier<AsyncValue<List<Campaign>>> {
       final items = [...parsed.items];
       final pages = parsed.totalPages < 5 ? parsed.totalPages : 5;
       for (var page = 1; page < pages; page++) {
-        final next = await _fetchCampaignsPage(page, 50, extra: {param: query});
+        final next = await _fetchCampaignsPage(
+          page,
+          50,
+          extra: {param: query},
+          retries: 1,
+        );
         if (next == null) break;
         items.addAll(_parsePage(next.data).items);
       }
@@ -467,6 +489,11 @@ class CampaignsNotifier extends StateNotifier<AsyncValue<List<Campaign>>> {
   Future<List<Campaign>?> searchOnServer(String query) async {
     final trimmed = query.trim();
     if (trimmed.length < 2 || _searchUnsupported) return null;
+
+    // Пока не загрузилась ни одна страница — искать негде и не в чем: поиск
+    // на бэкенде тогда только добавляет запросов к тому же эндпоинту, который
+    // и так не может отдать первую страницу. Ждём хотя бы её.
+    if (state.asData == null) return null;
 
     if (_searchParam != null) {
       final result = await _trySearch(_searchParam!, trimmed);

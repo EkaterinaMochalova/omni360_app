@@ -164,6 +164,11 @@ class _CampaignsScreenState extends ConsumerState<CampaignsScreen> {
 
   /// Догрузить список, если он остановлен и не грузится прямо сейчас.
   void _resumeListLoadIfIdle() {
+    // Первая страница ещё не пришла — это не «догрузка», а обычная первая
+    // загрузка, она уже идёт сама по себе. Второй параллельный fetch() здесь
+    // не отменит первый мгновенно (см. cancelLoad), а просто добавит ещё
+    // запросов к тому же самому падающему бэкенду.
+    if (ref.read(campaignsProvider).asData == null) return;
     final notifier = ref.read(campaignsProvider.notifier);
     if (!notifier.hasPendingPages) return;
     if (ref.read(campaignsLoadProgressProvider).loading) return;
@@ -172,6 +177,11 @@ class _CampaignsScreenState extends ConsumerState<CampaignsScreen> {
 
   Future<void> _runServerSearch(String query) async {
     final notifier = ref.read(campaignsProvider.notifier);
+
+    // Ни одной страницы ещё нет — искать негде, а сам запрос на бэкенд лишь
+    // добавит нагрузки к уже проблемной первой загрузке. Дожидаемся её и
+    // фильтруем локально то, что успело прийти (см. build()).
+    if (ref.read(campaignsProvider).asData == null) return;
 
     // Пока грузится весь список, поисковый запрос стоит в очереди за его
     // страницами — сначала освобождаем бэкенд, как и договаривались.
@@ -547,6 +557,19 @@ class _CampaignsScreenState extends ConsumerState<CampaignsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Пока не пришла первая страница, поиск на бэкенде ждёт (см.
+    // _runServerSearch) — но раз ждать, то не молча: как только страница
+    // придёт, отправляем уже набранный запрос, а не только фильтруем
+    // локально то, что успело загрузиться.
+    ref.listen(campaignsProvider, (previous, next) {
+      if (previous?.asData == null &&
+          next.asData != null &&
+          _search.trim().length >= 2 &&
+          _serverResults == null) {
+        _runServerSearch(_search.trim());
+      }
+    });
+
     final campaigns = ref.watch(campaignsProvider);
     final favorites = ref.watch(favoritesProvider);
 
