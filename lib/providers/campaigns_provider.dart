@@ -8,8 +8,52 @@ import '../utils/broadcast_schedule.dart';
 
 // --- Campaigns list ---
 
+/// Совпадает ли кампания с поисковым запросом.
+///
+/// Одна функция на весь проект: этим же правилом проверяется, понял ли бэкенд
+/// параметр поиска (см. [CampaignsNotifier.searchOnServer]), и по нему же
+/// фильтруется уже загруженный список. Разойдись они — и «серверный поиск
+/// работает» означало бы не то же самое, что видит пользователь.
+bool campaignMatchesQuery(Campaign campaign, String query) {
+  final q = query.trim().toLowerCase();
+  if (q.isEmpty) return true;
+  return campaign.name.toLowerCase().contains(q) ||
+      (campaign.advertiser?.toLowerCase().contains(q) ?? false) ||
+      (campaign.agencyName?.toLowerCase().contains(q) ?? false) ||
+      campaign.id.toLowerCase().contains(q);
+}
+
+/// Прогресс загрузки списка.
+///
+/// У master-аккаунта кампании идут десятками страниц, и поиск до конца
+/// загрузки видит только загруженное. Без этих цифр экран выглядел так, будто
+/// кампании нет вовсе, — а она просто в ещё не пришедшей странице.
+class CampaignsLoadProgress {
+  final int loaded;
+
+  /// `totalElements` бэкенда — сколько кампаний всего. null, если ответ без
+  /// пагинации.
+  final int? total;
+  final bool loading;
+
+  /// Загрузка прервана (обычно серверным поиском), часть страниц не читалась.
+  final bool paused;
+
+  const CampaignsLoadProgress({
+    this.loaded = 0,
+    this.total,
+    this.loading = false,
+    this.paused = false,
+  });
+}
+
+final campaignsLoadProgressProvider = StateProvider<CampaignsLoadProgress>(
+  (_) => const CampaignsLoadProgress(),
+);
+
 class CampaignsNotifier extends StateNotifier<AsyncValue<List<Campaign>>> {
   final _client = Omni360Client();
+  final Ref _ref;
 
   /// Последняя загрузка прошла не полностью: часть страниц не пришла.
   ///
@@ -17,7 +61,7 @@ class CampaignsNotifier extends StateNotifier<AsyncValue<List<Campaign>>> {
   /// кампаний» было не отличить от «страница с ними не загрузилась».
   bool incomplete = false;
 
-  CampaignsNotifier() : super(const AsyncValue.loading()) {
+  CampaignsNotifier(this._ref) : super(const AsyncValue.loading()) {
     fetch();
   }
 
@@ -31,12 +75,95 @@ class CampaignsNotifier extends StateNotifier<AsyncValue<List<Campaign>>> {
   /// бэкенд отдаст неправдоподобный totalPages.
   static const _maxPages = 300;
 
+  /// Сколько страниц тянем одновременно. Раньше страницы шли строго по одной,
+  /// и на аккаунте, который видит все кампании, список набирался минутами.
+  /// Больше четырёх этот прокси не переносит — начинаются 502.
+  static const _maxConcurrency = 4;
+
+  /// Загруженные страницы по номеру. Нужны, чтобы догружать список с места
+  /// остановки, а не с нуля, после того как его прервал поиск.
+  final Map<int, List<Campaign>> _pages = {};
+  int _pageSize = _pageSizeLadder.first;
+  int _totalPages = 1;
+  int? _totalElements;
+
+  /// Номер поколения загрузки: увеличивается при новой загрузке и при отмене.
+  /// Всё, что вернулось от прошлого поколения, выбрасывается.
+  int _generation = 0;
+
+  /// Сколько страниц имеет смысл читать с учётом предохранителя.
+  int get _pageLimit => _totalPages < _maxPages ? _totalPages : _maxPages;
+
+  /// Есть ли ещё непрочитанные страницы — от этого зависит, предлагать ли
+  /// «догрузить список».
+  bool get hasPendingPages => _pages.length < _pageLimit;
+
+  List<Campaign> _flatten() {
+    final indexes = _pages.keys.toList()..sort();
+    final result = <Campaign>[];
+    for (final index in indexes) {
+      result.addAll(_pages[index]!);
+    }
+    return result;
+  }
+
+  int get _loadedCount =>
+      _pages.values.fold(0, (sum, page) => sum + page.length);
+
+  /// Публикуется только из асинхронных участков: менять другой провайдер в
+  /// момент собственного создания Riverpod не разрешает.
+  void _setProgress({required bool loading, bool paused = false}) {
+    _ref.read(campaignsLoadProgressProvider.notifier).state =
+        CampaignsLoadProgress(
+          loaded: _loadedCount,
+          total: _totalElements,
+          loading: loading,
+          paused: paused,
+        );
+  }
+
+  /// Разбор страницы: у эндпоинта три известных формы ответа.
+  ({List<Campaign> items, int totalPages, int? totalElements}) _parsePage(
+    dynamic data,
+  ) {
+    List<dynamic> chunk;
+    var totalPages = 1;
+    int? totalElements;
+
+    if (data is List) {
+      chunk = data;
+    } else if (data is Map && data['content'] is List) {
+      chunk = data['content'] as List;
+      totalPages = (data['totalPages'] as num?)?.toInt() ?? 1;
+      totalElements = (data['totalElements'] as num?)?.toInt();
+    } else if (data is Map && data['data'] is List) {
+      chunk = data['data'] as List;
+      totalPages = (data['totalPages'] as num?)?.toInt() ?? 1;
+      totalElements = (data['totalElements'] as num?)?.toInt();
+    } else {
+      chunk = const [];
+    }
+
+    return (
+      items: chunk
+          .whereType<Map<String, dynamic>>()
+          .map(Campaign.fromJson)
+          .toList(),
+      totalPages: totalPages,
+      totalElements: totalElements,
+    );
+  }
+
   /// Одна страница списка с повторами на временных сбоях.
   ///
   /// Возвращает null, если страница так и не пришла: список из-за одной
   /// страницы целиком терять незачем. Ошибки доступа (401/403) прокидываем —
   /// это не временный сбой, и молчать о нём нельзя.
-  Future<Response?> _fetchCampaignsPage(int page, int size) async {
+  Future<Response?> _fetchCampaignsPage(
+    int page,
+    int size, {
+    Map<String, dynamic>? extra,
+  }) async {
     const backoff = [
       Duration(milliseconds: 500),
       Duration(milliseconds: 1500),
@@ -47,7 +174,7 @@ class CampaignsNotifier extends StateNotifier<AsyncValue<List<Campaign>>> {
       try {
         return await _client.dio.get(
           '/api/v1.0/clients/campaigns',
-          queryParameters: {'page': page, 'size': size},
+          queryParameters: {'page': page, 'size': size, ...?extra},
         );
       } on DioException catch (e) {
         final status = e.response?.statusCode ?? 0;
@@ -75,73 +202,151 @@ class CampaignsNotifier extends StateNotifier<AsyncValue<List<Campaign>>> {
     return null;
   }
 
-  Future<List<Campaign>?> fetch({bool silent = false}) async {
-    final previous = state.asData?.value;
-    if (!silent || previous == null) {
-      state = const AsyncValue.loading();
+  /// Идущая загрузка и время последней полной.
+  ///
+  /// Фоновая проверка уведомлений раз в пять минут вызывает `fetch(silent:
+  /// true)`, и при старте это приходилось ровно на первую загрузку: список
+  /// начинал грузиться заново с нуля, а собранные страницы выбрасывались. На
+  /// аккаунте, который видит все кампании, это удваивало ожидание.
+  Future<List<Campaign>?>? _inFlight;
+  DateTime? _completedAt;
+  static const _freshFor = Duration(minutes: 2);
+
+  /// Загрузка списка.
+  ///
+  /// [resume] — продолжить с непрочитанных страниц, не выбрасывая уже
+  /// загруженные (список прерывается серверным поиском, чтобы не спорить с ним
+  /// за бэкенд).
+  Future<List<Campaign>?> fetch({bool silent = false, bool resume = false}) {
+    if (silent) {
+      final inFlight = _inFlight;
+      if (inFlight != null) return inFlight;
+
+      final previous = state.asData?.value;
+      final completedAt = _completedAt;
+      if (previous != null &&
+          !incomplete &&
+          completedAt != null &&
+          DateTime.now().difference(completedAt) < _freshFor) {
+        return Future.value(previous);
+      }
     }
 
-    try {
-      final campaigns = <Campaign>[];
-      var pageSize = _pageSizeLadder.first;
-      var page = 0;
-      var totalPages = 1;
-      var complete = true;
+    final future = _runFetch(silent: silent, resume: resume);
+    _inFlight = future;
+    future.whenComplete(() {
+      if (_inFlight == future) _inFlight = null;
+    });
+    return future;
+  }
 
-      do {
-        Response? response;
-        // Размер подбираем на первой странице, дальше держим найденный.
-        for (final size in page == 0 ? _pageSizeLadder : [pageSize]) {
-          response = await _fetchCampaignsPage(page, size);
-          if (response != null) {
-            pageSize = size;
+  Future<List<Campaign>?> _runFetch({
+    required bool silent,
+    required bool resume,
+  }) async {
+    final generation = ++_generation;
+    final previous = state.asData?.value;
+    // При догрузке крутилку вместо списка не ставим: список уже на экране, и
+    // подменять его на «загрузка» из-за оставшихся страниц незачем.
+    if ((!silent && !resume) || previous == null) {
+      state = const AsyncValue.loading();
+    }
+    if (!resume) {
+      _pages.clear();
+      _totalPages = 1;
+      _totalElements = null;
+      _pageSize = _pageSizeLadder.first;
+    }
+
+    // Отложенно: fetch вызывается из конструктора провайдера, а менять другой
+    // провайдер в этот момент Riverpod не разрешает. Микротаска отработает
+    // после сборки дерева, но до первого ответа сети.
+    Future<void>.microtask(() {
+      if (generation == _generation) _setProgress(loading: true);
+    });
+
+    try {
+      // Первая страница задаёт размер страницы и общее их число.
+      if (!_pages.containsKey(0)) {
+        Response? first;
+        for (final size in _pageSizeLadder) {
+          first = await _fetchCampaignsPage(0, size);
+          if (generation != _generation) return state.asData?.value;
+          if (first != null) {
+            _pageSize = size;
             break;
           }
         }
-
-        if (response == null) {
-          if (campaigns.isEmpty) {
-            throw Exception(
-              'Бэкенд не отдал список кампаний (502). Обычно это перегрузка — '
-              'попробуйте повторить через минуту.',
-            );
-          }
-          // ignore: avoid_print
-          print(
-            '[campaigns] список неполный: страница $page не пришла, '
-            'собрано ${campaigns.length} кампаний',
+        if (first == null) {
+          throw Exception(
+            'Бэкенд не отдал список кампаний (502). Обычно это перегрузка — '
+            'попробуйте повторить через минуту.',
           );
-          complete = false;
-          break;
         }
+        final parsed = _parsePage(first.data);
+        _pages[0] = parsed.items;
+        _totalPages = parsed.totalPages;
+        _totalElements = parsed.totalElements;
+        if (!silent) state = AsyncValue.data(_flatten());
+        _setProgress(loading: true);
+      }
 
-        final data = response.data;
-        List<dynamic> chunk;
-        if (data is List) {
-          chunk = data;
-          totalPages = 1; // no pagination info
-        } else if (data is Map && data['content'] is List) {
-          chunk = data['content'] as List;
-          totalPages = (data['totalPages'] as num?)?.toInt() ?? 1;
-        } else if (data is Map && data['data'] is List) {
-          chunk = data['data'] as List;
-          totalPages = (data['totalPages'] as num?)?.toInt() ?? 1;
-        } else {
-          chunk = [];
-          totalPages = 1;
+      final failed = <int>[];
+      var concurrency = _maxConcurrency;
+      var next = 1;
+
+      while (next < _pageLimit) {
+        final batch = <int>[];
+        while (batch.length < concurrency && next < _pageLimit) {
+          if (!_pages.containsKey(next)) batch.add(next);
+          next++;
         }
+        if (batch.isEmpty) continue;
 
-        campaigns.addAll(
-          chunk.map((e) => Campaign.fromJson(e as Map<String, dynamic>)),
+        final responses = await Future.wait(
+          batch.map((page) => _fetchCampaignsPage(page, _pageSize)),
         );
+        if (generation != _generation) return state.asData?.value;
+
+        var failures = 0;
+        for (var i = 0; i < batch.length; i++) {
+          final response = responses[i];
+          if (response == null) {
+            failed.add(batch[i]);
+            failures++;
+            continue;
+          }
+          _pages[batch[i]] = _parsePage(response.data).items;
+        }
+
+        // Параллельные запросы этот прокси переносит плохо: как только страницы
+        // начали падать, сбавляем темп, на чистом проходе — снова ускоряемся.
+        if (failures > 0) {
+          if (concurrency > 1) concurrency--;
+          await Future<void>.delayed(const Duration(seconds: 1));
+          if (generation != _generation) return state.asData?.value;
+        } else if (concurrency < _maxConcurrency) {
+          concurrency++;
+        }
 
         // Отдаём по мере готовности: на аккаунтах с сотнями кампаний ждать
         // все страницы, глядя на крутилку, незачем.
-        if (!silent) {
-          state = AsyncValue.data(List<Campaign>.from(campaigns));
-        }
-        page++;
-      } while (page < totalPages && page < _maxPages);
+        if (!silent) state = AsyncValue.data(_flatten());
+        _setProgress(loading: true);
+      }
+
+      // Упавшие страницы добираем по одной: залпом они уже не вышли.
+      for (final page in failed.toList()) {
+        final response = await _fetchCampaignsPage(page, _pageSize);
+        if (generation != _generation) return state.asData?.value;
+        if (response == null) continue;
+        _pages[page] = _parsePage(response.data).items;
+        failed.remove(page);
+        if (!silent) state = AsyncValue.data(_flatten());
+      }
+
+      final campaigns = _flatten();
+      final complete = failed.isEmpty && _pages.length >= _pageLimit;
 
       // Диагностика: по ней сразу видно, все ли кампании пришли и какие у них
       // статусы — «нет активных» бывает и настоящим ответом бэкенда.
@@ -153,9 +358,15 @@ class CampaignsNotifier extends StateNotifier<AsyncValue<List<Campaign>>> {
       // ignore: avoid_print
       print(
         '[campaigns] загружено ${campaigns.length} '
-        '(страниц $page из $totalPages по $pageSize, '
+        '(страниц ${_pages.length} из $_totalPages по $_pageSize, '
         'полностью: $complete) — $byStatus',
       );
+      if (failed.isNotEmpty) {
+        // ignore: avoid_print
+        print('[campaigns] не пришли страницы: $failed');
+      }
+
+      _setProgress(loading: false);
 
       // Неполный список не должен подменять уже показанный полный: иначе
       // кампания, чья страница не пришла, просто исчезает с экрана.
@@ -166,14 +377,123 @@ class CampaignsNotifier extends StateNotifier<AsyncValue<List<Campaign>>> {
       }
 
       incomplete = !complete;
+      if (complete) _completedAt = DateTime.now();
       state = AsyncValue.data(campaigns);
       return campaigns;
     } catch (e, st) {
+      if (generation != _generation) return state.asData?.value;
+      _setProgress(loading: false);
       if (!silent || previous == null) {
         state = AsyncValue.error(e, st);
       }
       return previous;
     }
+  }
+
+  /// Прервать догрузку списка, сохранив уже загруженное.
+  ///
+  /// Пока показывать нечего, прерывать нельзя: состояние осталось бы навсегда
+  /// в `loading`, и экран показывал бы крутилку вместо результатов поиска.
+  void cancelLoad() {
+    if (state.asData == null) return;
+    _generation++;
+    _setProgress(loading: false, paused: hasPendingPages);
+  }
+
+  /// Догрузить оставшиеся страницы (после того как загрузку прервал поиск).
+  Future<void> resumeLoad() => fetch(resume: true).then((_) {});
+
+  /// Кандидаты в имя параметра поиска. Документации по этому эндпоинту нет, а
+  /// гадать вслепую в коде дорого: пробуем по очереди и запоминаем сработавший
+  /// на всю сессию.
+  static const _searchParams = ['search', 'name', 'query', 'q', 'filter'];
+
+  String? _searchParam;
+  bool _searchUnsupported = false;
+
+  /// Одна попытка поиска на бэкенде.
+  ///
+  /// `ignored: true` — параметр бэкенд не понял (вернул обычную первую
+  /// страницу). Пустой ответ и сетевая ошибка ничего не доказывают: это
+  /// «неизвестно», иначе один запрос без совпадений навсегда выключил бы
+  /// серверный поиск.
+  Future<({List<Campaign>? items, bool ignored})> _trySearch(
+    String param,
+    String query,
+  ) async {
+    try {
+      final response = await _fetchCampaignsPage(0, 50, extra: {param: query});
+      if (response == null) return (items: null, ignored: false);
+
+      final parsed = _parsePage(response.data);
+      if (parsed.items.isEmpty) return (items: null, ignored: false);
+      if (!parsed.items.every((c) => campaignMatchesQuery(c, query))) {
+        return (items: null, ignored: true);
+      }
+
+      // Остальные страницы результата — их обычно единицы. Больше пяти не
+      // берём: столько уже проще искать уточнённым запросом.
+      final items = [...parsed.items];
+      final pages = parsed.totalPages < 5 ? parsed.totalPages : 5;
+      for (var page = 1; page < pages; page++) {
+        final next = await _fetchCampaignsPage(page, 50, extra: {param: query});
+        if (next == null) break;
+        items.addAll(_parsePage(next.data).items);
+      }
+      return (items: items, ignored: false);
+    } on DioException catch (e) {
+      final status = e.response?.statusCode ?? 0;
+      // ignore: avoid_print
+      print('[campaigns] поиск через "$param": HTTP $status');
+      // 400/404/405/422 — параметр бэкенду не подходит, вывод тот же, что и от
+      // проигнорированного. А 401/403 и сетевые сбои про параметр не говорят
+      // ничего, и выключать из-за них серверный поиск нельзя.
+      return (
+        items: null,
+        ignored:
+            status == 400 || status == 404 || status == 405 || status == 422,
+      );
+    } catch (e) {
+      // ignore: avoid_print
+      print('[campaigns] поиск через "$param" сорвался: $e');
+      return (items: null, ignored: false);
+    }
+  }
+
+  /// Поиск кампаний на бэкенде.
+  ///
+  /// null — искать на бэкенде не получилось (не поддерживает, ошибка сети или
+  /// ничего не нашлось); тогда экран ищет по уже загруженному списку.
+  Future<List<Campaign>?> searchOnServer(String query) async {
+    final trimmed = query.trim();
+    if (trimmed.length < 2 || _searchUnsupported) return null;
+
+    if (_searchParam != null) {
+      final result = await _trySearch(_searchParam!, trimmed);
+      return result.items;
+    }
+
+    var allIgnored = true;
+    for (final param in _searchParams) {
+      final result = await _trySearch(param, trimmed);
+      if (result.items != null) {
+        _searchParam = param;
+        // ignore: avoid_print
+        print('[campaigns] серверный поиск работает через параметр "$param"');
+        return result.items;
+      }
+      if (!result.ignored) allIgnored = false;
+    }
+
+    if (allIgnored) {
+      _searchUnsupported = true;
+      // ignore: avoid_print
+      print(
+        '[campaigns] бэкенд не понимает ни один из параметров поиска '
+        '$_searchParams — ищем по загруженному списку',
+      );
+    }
+    return null;
   }
 
   Future<void> changeState(String id, String newState) async {
@@ -184,7 +504,7 @@ class CampaignsNotifier extends StateNotifier<AsyncValue<List<Campaign>>> {
 
 final campaignsProvider =
     StateNotifierProvider<CampaignsNotifier, AsyncValue<List<Campaign>>>(
-      (_) => CampaignsNotifier(),
+      (ref) => CampaignsNotifier(ref),
     );
 
 // --- Single campaign detail ---

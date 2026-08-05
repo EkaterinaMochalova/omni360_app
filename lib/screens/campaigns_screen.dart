@@ -26,6 +26,8 @@ const _kCampaignsOrderKey = 'omni360-campaigns-order';
 /// Псевдостатус: стоит рядом с фильтрами по статусу, но фильтрует по звёздочке.
 const _kFavoritesFilter = 'Избранное';
 
+final _fmtCount = NumberFormat.decimalPattern('ru_RU');
+
 // ── Sort enum ─────────────────────────────────────────────────────────────────
 
 enum CampaignSort {
@@ -64,6 +66,13 @@ class _CampaignsScreenState extends ConsumerState<CampaignsScreen> {
   CampaignSort _sort = CampaignSort.nameAsc;
   final _searchCtrl = TextEditingController();
   String _search = '';
+
+  /// Поиск на бэкенде: запускается с задержкой после набора и возвращает
+  /// кампании, которых в загруженных страницах может ещё не быть.
+  Timer? _searchDebounce;
+  List<Campaign>? _serverResults;
+  bool _serverSearching = false;
+
   Timer? _notificationTimer;
   bool _notificationCheckInProgress = false;
   bool _notificationsEnabled = true;
@@ -94,7 +103,7 @@ class _CampaignsScreenState extends ConsumerState<CampaignsScreen> {
   @override
   void initState() {
     super.initState();
-    _searchCtrl.addListener(() => setState(() => _search = _searchCtrl.text));
+    _searchCtrl.addListener(_onSearchChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _initializeNotificationPreferences();
       _applyFavoritesDefaultFilter();
@@ -127,8 +136,67 @@ class _CampaignsScreenState extends ConsumerState<CampaignsScreen> {
   @override
   void dispose() {
     _notificationTimer?.cancel();
+    _searchDebounce?.cancel();
     _searchCtrl.dispose();
     super.dispose();
+  }
+
+  void _onSearchChanged() {
+    setState(() => _search = _searchCtrl.text);
+    _searchDebounce?.cancel();
+
+    final query = _searchCtrl.text.trim();
+    if (query.length < 2) {
+      if (_serverResults != null) {
+        setState(() => _serverResults = null);
+      }
+      _resumeListLoadIfIdle();
+      return;
+    }
+
+    // Дебаунс: иначе на каждую букву уходит запрос, а поиск на бэкенде мы ещё
+    // и оплачиваем остановкой загрузки списка.
+    _searchDebounce = Timer(
+      const Duration(milliseconds: 400),
+      () => _runServerSearch(query),
+    );
+  }
+
+  /// Догрузить список, если он остановлен и не грузится прямо сейчас.
+  void _resumeListLoadIfIdle() {
+    final notifier = ref.read(campaignsProvider.notifier);
+    if (!notifier.hasPendingPages) return;
+    if (ref.read(campaignsLoadProgressProvider).loading) return;
+    notifier.resumeLoad();
+  }
+
+  Future<void> _runServerSearch(String query) async {
+    final notifier = ref.read(campaignsProvider.notifier);
+
+    // Пока грузится весь список, поисковый запрос стоит в очереди за его
+    // страницами — сначала освобождаем бэкенд, как и договаривались.
+    final wasPending = notifier.hasPendingPages;
+    notifier.cancelLoad();
+
+    setState(() => _serverSearching = true);
+    List<Campaign>? found;
+    try {
+      found = await notifier.searchOnServer(query);
+    } catch (e) {
+      // Поиск на бэкенде — не то, из-за чего стоит ронять экран: остаётся
+      // поиск по загруженному списку.
+      // ignore: avoid_print
+      print('[campaigns] серверный поиск не удался: $e');
+    } finally {
+      if (mounted) setState(() => _serverSearching = false);
+    }
+    if (!mounted) return;
+
+    setState(() => _serverResults = found);
+    if (found == null && wasPending) {
+      // На бэкенде не нашли (или он поиск не умеет) — тогда нужен весь список.
+      _resumeListLoadIfIdle();
+    }
   }
 
   Future<void> _initializeNotificationPreferences() async {
@@ -410,6 +478,17 @@ class _CampaignsScreenState extends ConsumerState<CampaignsScreen> {
   List<Campaign> _apply(List<Campaign> all, FavoritesState favorites) {
     var list = all;
 
+    // Найденного на бэкенде может ещё не быть в загруженных страницах — без
+    // объединения кампания «не находится», хотя её только что нашли.
+    final serverResults = _serverResults;
+    if (serverResults != null && serverResults.isNotEmpty) {
+      final loadedIds = {for (final c in all) c.id};
+      final extra = serverResults
+          .where((c) => !loadedIds.contains(c.id))
+          .toList();
+      if (extra.isNotEmpty) list = [...all, ...extra];
+    }
+
     // Filter by status
     if (_filter == _kFavoritesFilter) {
       list = list.where(favorites.matches).toList();
@@ -428,17 +507,9 @@ class _CampaignsScreenState extends ConsumerState<CampaignsScreen> {
       }).toList();
     }
 
-    // Search
-    if (_search.isNotEmpty) {
-      final q = _search.toLowerCase();
-      list = list
-          .where(
-            (c) =>
-                c.name.toLowerCase().contains(q) ||
-                (c.advertiser?.toLowerCase().contains(q) ?? false) ||
-                c.id.toLowerCase().contains(q),
-          )
-          .toList();
+    // Search — тем же правилом, каким проверяется серверный поиск.
+    if (_search.trim().isNotEmpty) {
+      list = list.where((c) => campaignMatchesQuery(c, _search)).toList();
     }
 
     // Sort
@@ -692,6 +763,7 @@ class _CampaignsScreenState extends ConsumerState<CampaignsScreen> {
         ),
         data: (all) {
           final list = _apply(all, favorites);
+          final progress = ref.watch(campaignsLoadProgressProvider);
           // Неполный список выглядит точно как полный, и «нет кампаний» тогда
           // означает совсем не то, что кажется. Говорим об этом прямо.
           final incomplete = ref.read(campaignsProvider.notifier).incomplete;
@@ -729,32 +801,17 @@ class _CampaignsScreenState extends ConsumerState<CampaignsScreen> {
                     ],
                   ),
                 ),
+              _LoadProgressBar(
+                progress: progress,
+                searching: _serverSearching,
+                onResume: _resumeListLoadIfIdle,
+              ),
               // Stats bar
               _StatsBar(all: all, filtered: list, sort: _sort),
               // Grid
               Expanded(
                 child: list.isEmpty
-                    ? Center(
-                        child: Padding(
-                          padding: const EdgeInsets.all(24),
-                          child: Text(
-                            _filter == _kFavoritesFilter
-                                ? (favorites.isEmpty
-                                      ? 'В избранном пока ничего нет. Отметьте '
-                                            'звёздочкой кампанию на карточке '
-                                            'или рекламодателя/агентство через '
-                                            'звезду в правом верхнем углу.'
-                                      : 'Ни одна загруженная кампания не '
-                                            'подходит под избранное.')
-                                : 'Нет кампаний',
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(
-                              color: kTextSecondary,
-                              fontSize: 15,
-                            ),
-                          ),
-                        ),
-                      )
+                    ? _buildEmptyState(favorites, progress)
                     : RefreshIndicator(
                         color: kAccent,
                         onRefresh: () =>
@@ -786,6 +843,71 @@ class _CampaignsScreenState extends ConsumerState<CampaignsScreen> {
             ],
           );
         },
+      ),
+    );
+  }
+
+  /// Пустой список — это три разных сообщения, и раньше все три выглядели как
+  /// «Нет кампаний»: чаще всего кампания есть, просто не подходит под статусный
+  /// фильтр или ещё не догрузилась.
+  Widget _buildEmptyState(
+    FavoritesState favorites,
+    CampaignsLoadProgress progress,
+  ) {
+    final searching = _search.trim().isNotEmpty;
+    final String message;
+    String? actionLabel;
+    VoidCallback? action;
+
+    if (searching && _filter != 'Все') {
+      message =
+          'Среди «$_filter» ничего не нашлось. Возможно, кампания в другом '
+          'статусе.';
+      actionLabel = 'Искать по всем статусам';
+      action = () => setState(() {
+        _filter = 'Все';
+        _filterTouched = true;
+      });
+    } else if (searching) {
+      message = progress.paused || progress.loading
+          ? 'Пока ничего не нашлось. Список загружен не полностью — '
+                '${_fmtCount.format(progress.loaded)} кампаний.'
+          : 'Ничего не нашлось.';
+      if (progress.paused) {
+        actionLabel = 'Догрузить список';
+        action = _resumeListLoadIfIdle;
+      }
+    } else if (_filter == _kFavoritesFilter) {
+      message = favorites.isEmpty
+          ? 'В избранном пока ничего нет. Отметьте звёздочкой кампанию на '
+                'карточке или рекламодателя/агентство через звезду в правом '
+                'верхнем углу.'
+          : 'Ни одна загруженная кампания не подходит под избранное.';
+    } else {
+      message = 'Нет кампаний';
+    }
+
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: kTextSecondary, fontSize: 15),
+            ),
+            if (actionLabel != null) ...[
+              const SizedBox(height: 12),
+              FilledButton(
+                onPressed: action,
+                style: FilledButton.styleFrom(backgroundColor: kAccent),
+                child: Text(actionLabel),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }
@@ -1020,6 +1142,105 @@ class _CampaignsScreenState extends ConsumerState<CampaignsScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// ── Load progress ─────────────────────────────────────────────────────────────
+
+/// Полоска о состоянии загрузки списка.
+///
+/// На аккаунте, который видит все кампании, список набирается заметное время, и
+/// поиск до конца загрузки видит только загруженное. Пока об этом не говорили,
+/// «кампания не находится» и «кампания ещё не загрузилась» выглядели одинаково.
+class _LoadProgressBar extends StatelessWidget {
+  final CampaignsLoadProgress progress;
+  final bool searching;
+  final VoidCallback onResume;
+
+  const _LoadProgressBar({
+    required this.progress,
+    required this.searching,
+    required this.onResume,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (searching) {
+      return _bar(
+        const Color(0xFFE3F2FD),
+        const Color(0xFF1565C0),
+        'Ищем на бэкенде…',
+        showSpinner: true,
+      );
+    }
+
+    if (progress.loading) {
+      final total = progress.total;
+      final of = total != null && total > 0
+          ? ' из ${_fmtCount.format(total)}'
+          : '';
+      return _bar(
+        const Color(0xFFE3F2FD),
+        const Color(0xFF1565C0),
+        'Загружаем список: ${_fmtCount.format(progress.loaded)}$of. '
+        'Поиск пока идёт по загруженным.',
+        showSpinner: true,
+      );
+    }
+
+    if (progress.paused) {
+      final total = progress.total;
+      final of = total != null && total > 0
+          ? ' из ${_fmtCount.format(total)}'
+          : '';
+      return _bar(
+        const Color(0xFFFFF3E0),
+        const Color(0xFFE65100),
+        'Загрузка списка остановлена на ${_fmtCount.format(progress.loaded)}$of — '
+        'чтобы не мешать поиску.',
+        action: 'Догрузить',
+      );
+    }
+
+    return const SizedBox.shrink();
+  }
+
+  Widget _bar(
+    Color bg,
+    Color fg,
+    String text, {
+    bool showSpinner = false,
+    String? action,
+  }) {
+    return Container(
+      width: double.infinity,
+      color: bg,
+      padding: const EdgeInsets.fromLTRB(16, 6, 8, 6),
+      child: Row(
+        children: [
+          if (showSpinner) ...[
+            SizedBox(
+              width: 12,
+              height: 12,
+              child: CircularProgressIndicator(strokeWidth: 2, color: fg),
+            ),
+            const SizedBox(width: 10),
+          ],
+          Expanded(
+            child: Text(text, style: TextStyle(color: fg, fontSize: 12)),
+          ),
+          if (action != null)
+            TextButton(
+              onPressed: onResume,
+              style: TextButton.styleFrom(
+                foregroundColor: fg,
+                minimumSize: const Size(0, 30),
+              ),
+              child: Text(action, style: const TextStyle(fontSize: 12)),
+            ),
+        ],
       ),
     );
   }
