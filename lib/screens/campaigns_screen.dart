@@ -7,8 +7,10 @@ import '../main.dart';
 import '../models/campaign.dart';
 import '../models/pace_summary.dart';
 import '../providers/campaigns_provider.dart';
+import '../providers/favorites_provider.dart';
 import '../utils/broadcast_schedule.dart';
 import '../services/app_notifications_service.dart';
+import '../services/favorites_store.dart';
 import '../services/local_order_store.dart';
 import '../utils/campaign_notifications.dart';
 import '../utils/pace_alerts.dart';
@@ -20,6 +22,9 @@ import 'campaign_detail.dart';
 // Переходы в сервисный дашборд и бюджеты/темпы живут в AppSidebar.
 
 const _kCampaignsOrderKey = 'omni360-campaigns-order';
+
+/// Псевдостатус: стоит рядом с фильтрами по статусу, но фильтрует по звёздочке.
+const _kFavoritesFilter = 'Избранное';
 
 // ── Sort enum ─────────────────────────────────────────────────────────────────
 
@@ -70,9 +75,14 @@ class _CampaignsScreenState extends ConsumerState<CampaignsScreen> {
 
   List<String>? _customOrder;
 
+  /// Фильтр по умолчанию подменяется на «Избранное» только до первого выбора
+  /// пользователем — иначе он бы возвращался обратно после загрузки избранного.
+  bool _filterTouched = false;
+
   static const _notificationCheckInterval = Duration(minutes: 5);
 
   static const _filters = [
+    _kFavoritesFilter,
     'Все',
     'Активна',
     'Новая',
@@ -87,8 +97,18 @@ class _CampaignsScreenState extends ConsumerState<CampaignsScreen> {
     _searchCtrl.addListener(() => setState(() => _search = _searchCtrl.text));
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _initializeNotificationPreferences();
+      _applyFavoritesDefaultFilter();
     });
     _loadCustomOrder();
+  }
+
+  /// Если в избранном что-то есть — открываем сразу его, а не «Активные».
+  Future<void> _applyFavoritesDefaultFilter() async {
+    await ref.read(favoritesProvider.notifier).ready;
+    if (!mounted || _filterTouched) return;
+    if (ref.read(favoritesProvider).isNotEmpty) {
+      setState(() => _filter = _kFavoritesFilter);
+    }
   }
 
   Future<void> _loadCustomOrder() async {
@@ -387,11 +407,13 @@ class _CampaignsScreenState extends ConsumerState<CampaignsScreen> {
     });
   }
 
-  List<Campaign> _apply(List<Campaign> all) {
+  List<Campaign> _apply(List<Campaign> all, FavoritesState favorites) {
     var list = all;
 
     // Filter by status
-    if (_filter != 'Все') {
+    if (_filter == _kFavoritesFilter) {
+      list = list.where(favorites.matches).toList();
+    } else if (_filter != 'Все') {
       list = list.where((c) {
         final ds = c.displayStatus;
         return ds == _filter ||
@@ -455,19 +477,24 @@ class _CampaignsScreenState extends ConsumerState<CampaignsScreen> {
   @override
   Widget build(BuildContext context) {
     final campaigns = ref.watch(campaignsProvider);
+    final favorites = ref.watch(favoritesProvider);
 
     return Scaffold(
       backgroundColor: kBg,
       body: Row(
         children: [
           const AppSidebar(current: AppSection.campaigns),
-          Expanded(child: _buildContent(context, campaigns)),
+          Expanded(child: _buildContent(context, campaigns, favorites)),
         ],
       ),
     );
   }
 
-  Widget _buildContent(BuildContext context, AsyncValue<List<Campaign>> campaigns) {
+  Widget _buildContent(
+    BuildContext context,
+    AsyncValue<List<Campaign>> campaigns,
+    FavoritesState favorites,
+  ) {
     return Scaffold(
       backgroundColor: kBg,
       appBar: AppBar(
@@ -484,6 +511,20 @@ class _CampaignsScreenState extends ConsumerState<CampaignsScreen> {
         titleSpacing: 16,
         actions: [
           // Переходы на сервисный дашборд и бюджеты/темпы переехали в сайдбар.
+          campaigns.maybeWhen(
+            data: (all) => _HeaderActionButton(
+              tooltip: 'Избранное: кампании, рекламодатели, агентства',
+              onTap: () => _showFavoritesSheet(context, all),
+              child: Icon(
+                favorites.isNotEmpty
+                    ? Icons.star_rounded
+                    : Icons.star_outline_rounded,
+                color: favorites.isNotEmpty ? _kStarColor : kTextSecondary,
+                size: 21,
+              ),
+            ),
+            orElse: () => const SizedBox.shrink(),
+          ),
           _HeaderActionButton(
             tooltip: _notificationsEnabled
                 ? 'Уведомления'
@@ -612,7 +653,11 @@ class _CampaignsScreenState extends ConsumerState<CampaignsScreen> {
               _FilterBar(
                 selected: _filter,
                 filters: _filters,
-                onSelect: (f) => setState(() => _filter = f),
+                favoritesCount: favorites.total,
+                onSelect: (f) => setState(() {
+                  _filter = f;
+                  _filterTouched = true;
+                }),
               ),
             ],
           ),
@@ -646,7 +691,7 @@ class _CampaignsScreenState extends ConsumerState<CampaignsScreen> {
           ),
         ),
         data: (all) {
-          final list = _apply(all);
+          final list = _apply(all, favorites);
           // Неполный список выглядит точно как полный, и «нет кампаний» тогда
           // означает совсем не то, что кажется. Говорим об этом прямо.
           final incomplete = ref.read(campaignsProvider.notifier).incomplete;
@@ -689,12 +734,24 @@ class _CampaignsScreenState extends ConsumerState<CampaignsScreen> {
               // Grid
               Expanded(
                 child: list.isEmpty
-                    ? const Center(
-                        child: Text(
-                          'Нет кампаний',
-                          style: TextStyle(
-                            color: kTextSecondary,
-                            fontSize: 15,
+                    ? Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(24),
+                          child: Text(
+                            _filter == _kFavoritesFilter
+                                ? (favorites.isEmpty
+                                      ? 'В избранном пока ничего нет. Отметьте '
+                                            'звёздочкой кампанию на карточке '
+                                            'или рекламодателя/агентство через '
+                                            'звезду в правом верхнем углу.'
+                                      : 'Ни одна загруженная кампания не '
+                                            'подходит под избранное.')
+                                : 'Нет кампаний',
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: kTextSecondary,
+                              fontSize: 15,
+                            ),
                           ),
                         ),
                       )
@@ -727,6 +784,171 @@ class _CampaignsScreenState extends ConsumerState<CampaignsScreen> {
                       ),
               ),
             ],
+          );
+        },
+      ),
+    );
+  }
+
+  /// Управление избранным: кампании отмечаются прямо на карточке, а
+  /// рекламодателей и агентства иначе отметить негде — они не отдельные
+  /// сущности в интерфейсе, а поля кампании.
+  void _showFavoritesSheet(BuildContext context, List<Campaign> all) {
+    Set<String> collect(String? Function(Campaign) pick) {
+      final result = <String>{};
+      for (final campaign in all) {
+        final value = pick(campaign)?.trim();
+        if (value != null && value.isNotEmpty) result.add(value);
+      }
+      return result;
+    }
+
+    // Отмеченные — сверху (в том числе те, которых в загруженном списке уже
+    // нет: иначе их нельзя было бы снять), остальные — по алфавиту.
+    List<String> ordered(Set<String> available, Set<String> favored) {
+      final merged = {...available, ...favored}.toList();
+      merged.sort((a, b) {
+        final fa = favored.contains(a);
+        final fb = favored.contains(b);
+        if (fa != fb) return fa ? -1 : 1;
+        return a.toLowerCase().compareTo(b.toLowerCase());
+      });
+      return merged;
+    }
+
+    final advertisers = collect((c) => c.advertiser);
+    final agencies = collect((c) => c.agencyName);
+    final byId = {for (final c in all) c.id: c};
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetContext) => Consumer(
+        builder: (context, ref, unusedChild) {
+          final favorites = ref.watch(favoritesProvider);
+          final notifier = ref.read(favoritesProvider.notifier);
+
+          Widget section(
+            FavoriteKind kind,
+            List<String> keys,
+            String Function(String key) labelOf, {
+            String? emptyHint,
+          }) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(top: 14, bottom: 4),
+                  child: Text(
+                    kind.title,
+                    style: const TextStyle(
+                      color: kTextSecondary,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.4,
+                    ),
+                  ),
+                ),
+                if (keys.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Text(
+                      emptyHint ?? 'Пока пусто.',
+                      style: const TextStyle(
+                        color: kTextSecondary,
+                        fontSize: 12,
+                      ),
+                    ),
+                  )
+                else
+                  ...keys.map(
+                    (key) => _FavoriteRow(
+                      label: labelOf(key),
+                      selected: favorites.contains(kind, key),
+                      onTap: () => notifier.toggle(kind, key),
+                    ),
+                  ),
+              ],
+            );
+          }
+
+          return SafeArea(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(sheetContext).size.height * 0.8,
+              ),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 40,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: kBorder,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    const Text(
+                      'Избранное',
+                      style: TextStyle(
+                        color: kTextPrimary,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    const Text(
+                      'Фильтр «Избранное» показывает отмеченные кампании плюс '
+                      'все кампании отмеченных рекламодателей и агентств.',
+                      style: TextStyle(color: kTextSecondary, fontSize: 12),
+                    ),
+                    Flexible(
+                      child: SingleChildScrollView(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            section(
+                              FavoriteKind.campaign,
+                              ordered(const <String>{}, favorites.campaignIds),
+                              (id) => byId[id]?.name ?? 'ID: $id',
+                              emptyHint:
+                                  'Отметьте звёздочкой карточку кампании в '
+                                  'списке.',
+                            ),
+                            section(
+                              FavoriteKind.advertiser,
+                              ordered(advertisers, favorites.advertisers),
+                              (name) => name,
+                              emptyHint:
+                                  'В загруженных кампаниях рекламодатель не '
+                                  'указан.',
+                            ),
+                            section(
+                              FavoriteKind.agency,
+                              ordered(agencies, favorites.agencies),
+                              (name) => name,
+                              emptyHint:
+                                  'Бэкенд не отдаёт агентство в этих '
+                                  'кампаниях.',
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           );
         },
       ),
@@ -886,6 +1108,90 @@ class _StatChip extends StatelessWidget {
   );
 }
 
+// ── Favorites ─────────────────────────────────────────────────────────────────
+
+const _kStarColor = Color(0xFFF9A825);
+
+class _FavoriteRow extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _FavoriteRow({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+        child: Row(
+          children: [
+            Icon(
+              selected ? Icons.star_rounded : Icons.star_outline_rounded,
+              color: selected ? _kStarColor : kTextSecondary,
+              size: 20,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                label,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: kTextPrimary,
+                  fontSize: 13,
+                  fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Звёздочка на карточке кампании. Отдельный жест внутри кликабельной плитки:
+/// нажатие по звезде не должно открывать кампанию.
+class _FavoriteStar extends StatelessWidget {
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _FavoriteStar({required this.selected, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: selected ? 'Убрать из избранного' : 'В избранное',
+      child: SizedBox(
+        width: 28,
+        height: 28,
+        child: Material(
+          color: Colors.transparent,
+          shape: const CircleBorder(),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: onTap,
+            child: Center(
+              child: Icon(
+                selected ? Icons.star_rounded : Icons.star_outline_rounded,
+                color: selected ? _kStarColor : kTextSecondary,
+                size: 19,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 // ── Filter chips ──────────────────────────────────────────────────────────────
 
 class _FilterBar extends StatelessWidget {
@@ -893,10 +1199,15 @@ class _FilterBar extends StatelessWidget {
   final List<String> filters;
   final void Function(String) onSelect;
 
+  /// Сколько всего отмечено звёздочкой — числом на чипе «Избранное», чтобы
+  /// пустой список под фильтром не выглядел поломкой.
+  final int favoritesCount;
+
   const _FilterBar({
     required this.selected,
     required this.filters,
     required this.onSelect,
+    this.favoritesCount = 0,
   });
 
   @override
@@ -908,21 +1219,42 @@ class _FilterBar extends StatelessWidget {
       runSpacing: 6,
       children: filters.map((f) {
         final sel = f == selected;
+        final isFavorites = f == _kFavoritesFilter;
         return GestureDetector(
           onTap: () => onSelect(f),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-            decoration: BoxDecoration(
-              color: sel ? kAccent : Colors.white,
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: sel ? kAccent : kBorder),
-            ),
-            child: Text(
-              f,
-              style: TextStyle(
-                color: sel ? Colors.white : kTextSecondary,
-                fontSize: 11,
-                fontWeight: sel ? FontWeight.w600 : FontWeight.normal,
+          child: MouseRegion(
+            cursor: SystemMouseCursors.click,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: sel ? kAccent : Colors.white,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: sel ? kAccent : kBorder),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (isFavorites) ...[
+                    Icon(
+                      favoritesCount > 0
+                          ? Icons.star_rounded
+                          : Icons.star_outline_rounded,
+                      size: 13,
+                      color: sel ? Colors.white : _kStarColor,
+                    ),
+                    const SizedBox(width: 4),
+                  ],
+                  Text(
+                    isFavorites && favoritesCount > 0
+                        ? '$f ($favoritesCount)'
+                        : f,
+                    style: TextStyle(
+                      color: sel ? Colors.white : kTextSecondary,
+                      fontSize: 11,
+                      fontWeight: sel ? FontWeight.w600 : FontWeight.normal,
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
@@ -996,6 +1328,10 @@ class _CampaignCard extends ConsumerWidget {
         : (cardStats != null && cardStats.factBudget > 0
               ? cardStats.factBudget
               : null);
+
+    final isFavorite = ref.watch(
+      favoritesProvider.select((f) => f.campaignIds.contains(c.id)),
+    );
 
     final (statusBg, statusFg) = campaignStatusPalette(c.statusKind);
     final ratio = (effectiveSpent != null && c.budget != null && c.budget! > 0)
@@ -1096,6 +1432,13 @@ class _CampaignCard extends ConsumerWidget {
                       fontWeight: FontWeight.w500,
                     ),
                   ),
+                ),
+                const SizedBox(width: 4),
+                _FavoriteStar(
+                  selected: isFavorite,
+                  onTap: () => ref
+                      .read(favoritesProvider.notifier)
+                      .toggle(FavoriteKind.campaign, c.id),
                 ),
               ],
             ),

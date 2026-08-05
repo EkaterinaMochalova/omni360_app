@@ -203,6 +203,10 @@ class Campaign {
   final String? customerName;
   final int? brandId;
   final String? brandName;
+
+  /// Агентство кампании. Нужно для избранного (можно отметить агентство и
+  /// видеть все его кампании), поэтому храним имя как есть — оно же и ключ.
+  final String? agencyName;
   final double? budget;
   final double? dailyBudget;
   final double? spent;
@@ -234,6 +238,7 @@ class Campaign {
     this.customerName,
     this.brandId,
     this.brandName,
+    this.agencyName,
     this.budget,
     this.dailyBudget,
     this.spent,
@@ -275,6 +280,7 @@ class Campaign {
       customerName: customer?['name']?.toString(),
       brandId: _toInt(brand?['id']),
       brandName: brand?['name']?.toString(),
+      agencyName: _extractName(json['agency']) ?? _extractName(json['agencyName']),
       // В детальном ответе бюджет лежит не там, где в списочном: наверху
       // totalBudget может быть пустым, а сумма — внутри budgetConfig. Из-за
       // этого блок «Выполнение лимита» считал, что бюджета нет вовсе.
@@ -315,6 +321,20 @@ class Campaign {
       timeSettings: TimeSlot.collectFrom(json),
       inventories: CampaignInventoryRef.collectFrom(json),
     );
+  }
+
+  /// Имя сущности, которая в разных ответах приходит то объектом `{name: ...}`,
+  /// то просто строкой (агентство — как раз такой случай).
+  static String? _extractName(dynamic value) {
+    if (value is Map) {
+      final name = value['name']?.toString().trim();
+      return (name == null || name.isEmpty) ? null : name;
+    }
+    if (value is String) {
+      final name = value.trim();
+      return name.isEmpty ? null : name;
+    }
+    return null;
   }
 
   /// Первое положительное число из [keys] — сначала на верхнем уровне, потом
@@ -533,6 +553,7 @@ class Campaign {
       customerName: customerName,
       brandId: brandId,
       brandName: brandName,
+      agencyName: agencyName,
       budget: budget ?? this.budget,
       dailyBudget: dailyBudget,
       spent: spent,

@@ -5,6 +5,8 @@ import 'package:intl/intl.dart';
 import '../main.dart';
 import '../providers/campaigns_provider.dart';
 import '../providers/campaign_analytics_provider.dart';
+import '../providers/favorites_provider.dart';
+import '../services/favorites_store.dart';
 import '../models/campaign.dart';
 import '../models/campaign_analytics.dart';
 import '../models/loss_report.dart';
@@ -234,6 +236,29 @@ class _CampaignDetailScreenState extends ConsumerState<CampaignDetailScreen> {
               const Text('Кампания', style: TextStyle(color: kTextPrimary)),
         ),
         actions: [
+          // Звёздочка и здесь: чаще всего решение «за этой кампанией слежу»
+          // принимается уже внутри карточки, а не в списке.
+          Consumer(
+            builder: (context, favRef, unusedChild) {
+              final isFavorite = favRef.watch(
+                favoritesProvider.select(
+                  (f) => f.campaignIds.contains(campaignId),
+                ),
+              );
+              return IconButton(
+                tooltip: isFavorite ? 'Убрать из избранного' : 'В избранное',
+                onPressed: () => favRef
+                    .read(favoritesProvider.notifier)
+                    .toggle(FavoriteKind.campaign, campaignId),
+                icon: Icon(
+                  isFavorite
+                      ? Icons.star_rounded
+                      : Icons.star_outline_rounded,
+                  color: isFavorite ? const Color(0xFFF9A825) : null,
+                ),
+              );
+            },
+          ),
           IconButton(
             tooltip: 'Период показов',
             onPressed: detail.asData == null
